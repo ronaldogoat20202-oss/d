@@ -8,6 +8,14 @@ export const networkFetch: FetchPort = (url, init) => fetchWithProxy(url, {
   signal: init?.signal || AbortSignal.timeout(60000)
 } as Parameters<typeof fetchWithProxy>[1]) as unknown as Promise<Response>
 
+export async function boundedText(response: Response, limit = 4 * 1024 ** 2): Promise<string> {
+  if (!response.body) throw new Error('The provider returned an empty response.')
+  const reader=response.body.getReader(), chunks:Uint8Array[]=[];let size=0
+  try { for (;;) { const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit)throw new Error('Provider metadata exceeds the size limit.');chunks.push(value) } }
+  finally { await reader.cancel().catch(()=>undefined);reader.releaseLock() }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 const downloadHosts = new Set(['piston-meta.mojang.com', 'piston-data.mojang.com', 'libraries.minecraft.net', 'resources.download.minecraft.net', 'launchermeta.mojang.com', 'launcher.mojang.com'])
 export function assertOfficialUrl(value: string): void {
   const url = new URL(value)

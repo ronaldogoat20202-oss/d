@@ -1,4 +1,4 @@
-import { assertVersionId, networkFetch, type FetchPort } from '../services/network'
+import { assertVersionId, boundedText, networkFetch, type FetchPort } from '../services/network'
 export interface FabricLibrary { name: string; url?: string; sha1?: string; sha512?: string; size?: number }
 export interface FabricProfile { id: string; inheritsFrom: string; mainClass: string; libraries: FabricLibrary[]; [key: string]: unknown }
 export const fabricId = (game: string, loader: string) => `fabric-loader-${loader}-${game}`
@@ -7,8 +7,7 @@ export class FabricMeta {
   private async request(path: string): Promise<unknown> {
     const response = await this.fetcher('https://meta.fabricmc.net/v2/' + path, { headers: { 'User-Agent':'ronaldogoat20202-oss/Orbit-Launcher/0.2.0' } })
     if (!response.ok) throw new Error('Fabric metadata is unavailable for this release. Check your connection and try again.')
-    const body = await response.text()
-    if (Buffer.byteLength(body) > 4 * 1024 ** 2) throw new Error('Fabric metadata is too large.')
+    const body = await boundedText(response)
     return JSON.parse(body)
   }
   async listLoaders(game: string): Promise<{version:string;stable:boolean}[]> {
