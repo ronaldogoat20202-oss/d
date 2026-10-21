@@ -6,6 +6,8 @@ import { generateArguments } from '@xmcl/core'
 import { minecraftFixture } from '../fixtures/minecraft'
 import { InstallService } from '../../src/main/services/installer'
 import { makeLaunchOptions, guardSpawn } from '../../src/main/adapters/minecraft-launcher'
+import { launchGame } from '../../src/main/services/game'
+import { vi } from 'vitest'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))) })
 it('constructs authenticated arguments with client ID and XUID and preserves spaced paths', async () => {
@@ -27,4 +29,20 @@ it('refuses unresolved placeholders and shell execution at the process boundary'
   expect(() => guardSpawn('/java', ['${auth_xuid}'], { shell: false })).toThrow(/unresolved/i)
   expect(() => guardSpawn('/java', ['Main'], { shell: true })).toThrow(/shell/i)
   expect(() => guardSpawn('/java path/java', ['argument with spaces'], { shell: false })).not.toThrow()
+})
+it('rechecks authorization after asynchronous core prechecks before spawning Java', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'orbit-spawn-')); roots.push(root)
+  const fixture = minecraftFixture()
+  const version = await new InstallService(fixture.fetcher).ensure(fixture.release, root, () => {})
+  let resume!: () => void
+  let authorized = true
+  const spawn = vi.fn(() => { throw new Error('Actual process must not spawn') })
+  const pending = launchGame({ settings: { clientId: 'own-id', javaPath: '/java', gameDirectory: root, maxMemoryMiB: 2048 }, version,
+    session: { clientId: 'own-id', xuid: '12345', accessToken: 'secret', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } },
+    assertAuthorized: () => { if (!authorized) throw new Error('Account changed') }, onLog: () => {}, onExit: () => {}
+  }, { spawn, launch: async options => { await new Promise<void>(resolve => { resume = resolve }); return options.spawn!('/java', ['Main'], { shell: false }) } })
+  await vi.waitFor(() => expect(resume).toBeDefined())
+  authorized = false; resume()
+  await expect(pending).rejects.toThrow(/could not start/i)
+  expect(spawn).not.toHaveBeenCalled()
 })

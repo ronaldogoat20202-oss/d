@@ -1,7 +1,7 @@
 # Orbit Launcher design
 
 Date: 2026-10-21
-Status: approved for implementation planning; implementation plan pending review
+Status: implemented; automated/Linux checks complete; Windows/account acceptance unverified
 
 ## Purpose and scope
 

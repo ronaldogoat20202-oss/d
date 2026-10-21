@@ -1,15 +1,21 @@
-import { launch } from '@xmcl/core'
+import { launch, type LaunchOption } from '@xmcl/core'
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { guardSpawn, makeLaunchOptions, type LaunchConfiguration } from '../adapters/minecraft-launcher'
 
-export interface LaunchInput extends LaunchConfiguration { onLog(text: string): void; onExit(code: number | null): void }
-export async function launchGame(input: LaunchInput): Promise<ChildProcess> {
+export interface LaunchInput extends LaunchConfiguration { assertAuthorized(): void; onLog(text: string): void; onExit(code: number | null): void }
+interface GameRuntime {
+  launch(options: LaunchOption): Promise<ChildProcess>
+  spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess
+}
+const defaultRuntime: GameRuntime = { launch, spawn: (command, args, options) => nodeSpawn(command, [...args], options) }
+export async function launchGame(input: LaunchInput, runtime: GameRuntime = defaultRuntime): Promise<ChildProcess> {
   try {
     const options = await makeLaunchOptions(input)
     let spawned: Promise<ChildProcess> | null = null
-    const child = await launch({ ...options, spawn: (command: string, args: readonly string[] = [], execOptions: SpawnOptions = {}) => {
+    const child = await runtime.launch({ ...options, spawn: (command: string, args: readonly string[] = [], execOptions: SpawnOptions = {}) => {
+      input.assertAuthorized()
       guardSpawn(command, args, execOptions)
-      const process = nodeSpawn(command, [...args], { ...execOptions, shell: false, windowsHide: true })
+      const process = runtime.spawn(command, [...args], { ...execOptions, shell: false, windowsHide: true })
       spawned = new Promise<ChildProcess>((resolve, reject) => {
         process.once('spawn', () => resolve(process))
         process.once('error', () => reject(new Error('Minecraft could not start. Check Java and retry.')))

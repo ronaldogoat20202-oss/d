@@ -28,6 +28,7 @@ export class Controller {
   private authRequest: AbortController | null = null
   private editing = false
   private refreshing = false
+  private accountRevision = 0
   constructor(private deps: ControllerDependencies) {}
   async initialize(): Promise<void> {
     this.state = { settings: await this.deps.settings.read(), account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
@@ -74,7 +75,7 @@ export class Controller {
     try {
       const previous = this.state.settings
       const settings = await this.deps.settings.update(patch)
-      if (settings.clientId !== previous.clientId) { this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
+      if (settings.clientId !== previous.clientId) { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
       if (settings.gameDirectory !== previous.gameDirectory) this.state.installedVersionIds = []
       this.state.settings = settings; this.state.error = null; this.emit(); return this.snapshot()
     } catch (e) { throw this.failure(e, 'SETTINGS_INVALID') } finally { this.editing = false }
@@ -83,6 +84,7 @@ export class Controller {
   async chooseGameDirectory(): Promise<Snapshot> { const path = await this.deps.pickGameDirectory?.(); return path ? this.saveSettings({ gameDirectory: path }) : this.snapshot() }
   async signIn(): Promise<void> {
     if (this.authRequest) throw new Error('Sign-in is already in progress.')
+    this.accountRevision++
     const request = new AbortController(); this.authRequest = request
     this.state.account = { status: 'signingIn' }; this.state.error = null; this.emit()
     try {
@@ -95,11 +97,12 @@ export class Controller {
       if (!request.signal.aborted) { this.state.account = { status: 'signedOut' }; throw this.failure(e, 'SIGN_IN_FAILED') }
     } finally { if (this.authRequest === request) this.authRequest = null; this.emit() }
   }
-  async cancelSignIn(): Promise<void> { this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' }; this.emit() }
+  async cancelSignIn(): Promise<void> { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' }; this.emit() }
   async signOut(): Promise<void> { await this.cancelSignIn(); this.deps.logs.append('info', 'Signed out. Local account cache removed.'); this.emit() }
   async restoreAccount(): Promise<void> {
     if (!this.state.settings.clientId) return
-    try { const session = await this.deps.accounts.session(this.state.settings.clientId); this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }; this.emit() } catch { /* sign-in remains available */ }
+    const revision = this.accountRevision
+    try { const session = await this.deps.accounts.session(this.state.settings.clientId); if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id) return; this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }; this.emit() } catch { /* sign-in remains available */ }
   }
   private release() { const release = this.state.releases.find(r => r.id === this.state.selectedVersionId); if (!release) throw new Error('Choose an official Minecraft release first.'); return release }
   async install(): Promise<void> {
@@ -119,12 +122,18 @@ export class Controller {
   }
   async launch(): Promise<void> {
     this.idle(); const release = this.release()
+    const revision = this.accountRevision
     this.state.operation = { phase: 'launching', versionId: release.id }; this.state.error = null; this.emit()
     let exited = false
     try {
       const version = await this.deps.installer.inspect(release, this.state.settings.gameDirectory)
-      if (!version) throw new Error('Install or repair this Minecraft release before launching.')
+      if (!version) { this.state.installedVersionIds = this.state.installedVersionIds.filter(id => id !== release.id); throw new Error('Install or repair this Minecraft release before launching.') }
       const session = await this.deps.accounts.session(this.state.settings.clientId)
+      const assertAuthorized = () => {
+        if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id || this.state.settings.clientId !== session.clientId)
+          throw new Error('Your account changed while preparing Minecraft. Sign in and try again.')
+      }
+      assertAuthorized()
       this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }
       let javaPath = this.state.settings.javaPath
       if (!javaPath) {
@@ -135,7 +144,8 @@ export class Controller {
       const cap = Math.floor(this.deps.runtime.totalMemoryBytes * .75 / 1048576)
       if (this.deps.runtime.architecture !== 'x64' || this.state.settings.maxMemoryMiB < 1024 || this.state.settings.maxMemoryMiB > cap) throw new Error('Check x64 Java and memory allocation in Settings before launching.')
       this.deps.logs.registerSecret(session.accessToken)
-      await this.deps.launch({ settings: { ...this.state.settings, javaPath }, version, session,
+      assertAuthorized()
+      await this.deps.launch({ settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
         onLog: text => { this.deps.logs.append('info', text); this.emit() },
         onExit: code => { if (exited) return; exited = true; this.state.operation = { phase: 'idle' }; this.deps.logs.append(code === 0 ? 'info' : 'error', `Minecraft exited with ${code === null ? 'an interruption' : `code ${code}`}.`); if (code !== 0) this.state.error = { code: 'GAME_EXIT', message: `Minecraft stopped with exit code ${code ?? 'unknown'}. Check Logs and Java settings.` }; this.emit() }
       })

@@ -21,7 +21,7 @@ export function minecraftFixture() {
     assetIndex: { id: 'fixture', url: indexUrl, sha1: hash(assetIndex), size: Buffer.byteLength(assetIndex), totalSize: asset.length }, assets: 'fixture'
   })
   const release = { id: 'fixture', url: metadataUrl, sha1: hash(metadata), releasedAt: '2026-01-01T00:00:00Z' }
-  const files = new Map<string, Uint8Array>([[metadataUrl, Buffer.from(metadata)], [clientUrl, jar], [libraryUrl, jar], [indexUrl, Buffer.from(assetIndex)], [`https://resources.download.minecraft.net/${assetHash.slice(0, 2)}/${assetHash}`, asset]])
+  const files = new Map<string, Uint8Array>([[metadataUrl, Buffer.from(metadata)], [clientUrl, jar], [libraryUrl, jar], ['https://libraries.minecraft.net/linux.jar', jar], [indexUrl, Buffer.from(assetIndex)], [`https://resources.download.minecraft.net/${assetHash.slice(0, 2)}/${assetHash}`, asset]])
   const fetcher = async (url: string) => {
     const bytes = files.get(url)
     if (!bytes) throw new Error('Unexpected fixture URL: ' + url)

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Controller, type ControllerDependencies } from '../../src/main/controller'
@@ -9,6 +9,7 @@ import { JavaService } from '../../src/main/services/java'
 import { AccountService } from '../../src/main/services/accounts'
 import { LogService } from '../../src/main/services/logs'
 import { minecraftFixture } from '../fixtures/minecraft'
+import type { JavaRuntime } from '../../src/main/services/types'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))) })
 async function setup() {
@@ -70,4 +71,45 @@ it('cleans subscribers and invalidates the account when the application ID chang
   await controller.saveSettings({ clientId: '' })
   expect((await controller.snapshot()).account.status).toBe('signedOut')
   expect(listener).not.toHaveBeenCalled()
+})
+it('cancels a pending launch when the account signs out during Java verification', async () => {
+  const { controller, deps, id } = await setup()
+  await controller.install(); await controller.saveSettings({ clientId: id, javaPath: '/java21' }); await controller.signIn()
+  let release!: () => void
+  deps.java.verify = vi.fn(() => new Promise<JavaRuntime>(resolve => { release = () => resolve({ executable: '/java21', major: 21, architecture: 'x64' }) }))
+  const pending = controller.launch()
+  await vi.waitFor(() => expect(release).toBeDefined())
+  await controller.signOut(); release()
+  await expect(pending).rejects.toThrow(/account|sign in|cancel/i)
+  expect(deps.launch).not.toHaveBeenCalled()
+  expect((await controller.snapshot()).account.status).toBe('signedOut')
+  expect((await controller.snapshot()).operation.phase).toBe('idle')
+})
+it('invalidates authorization at the process boundary while launch prechecks are pending', async () => {
+  const { controller, deps, id } = await setup()
+  await controller.install(); await controller.saveSettings({ clientId: id, javaPath: '/java21' }); await controller.signIn()
+  let resume!: () => void
+  let spawns = 0
+  deps.launch = vi.fn(async input => {
+    await new Promise<void>(resolve => { resume = resolve })
+    input.assertAuthorized(); spawns++
+    return {} as never
+  })
+  const pending = controller.launch()
+  await vi.waitFor(() => expect(resume).toBeDefined())
+  await controller.signOut(); resume()
+  await expect(pending).rejects.toThrow(/account|sign in|cancel/i)
+  expect(spawns).toBe(0)
+  expect((await controller.snapshot()).operation.phase).toBe('idle')
+})
+it('removes corrupt installed state and repairs the release with the Install action', async () => {
+  const { controller, deps } = await setup()
+  await controller.install()
+  const root = (await controller.snapshot()).settings.gameDirectory
+  await writeFile(join(root, 'versions/fixture/fixture.jar'), 'corrupt data')
+  await expect(controller.launch()).rejects.toThrow(/repair|install/i)
+  expect((await controller.snapshot()).installedVersionIds).not.toContain('fixture')
+  expect(deps.launch).not.toHaveBeenCalled()
+  await controller.install()
+  expect((await controller.snapshot()).installedVersionIds).toContain('fixture')
 })
