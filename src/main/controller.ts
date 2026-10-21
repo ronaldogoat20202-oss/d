@@ -1,0 +1,149 @@
+import type { LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
+import type { SettingsStore } from './services/settings'
+import type { VersionService } from './services/versions'
+import type { InstallService } from './services/installer'
+import type { AccountService } from './services/accounts'
+import type { JavaService } from './services/java'
+import type { LogService } from './services/logs'
+import type { launchGame } from './services/game'
+import type { RuntimePort } from './services/types'
+
+export interface ControllerDependencies {
+  settings: Pick<SettingsStore, 'read' | 'update'>
+  versions: Pick<VersionService, 'list'>
+  installer: Pick<InstallService, 'ensure' | 'inspect'>
+  accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent'>
+  java: Pick<JavaService, 'verify' | 'detect'>
+  logs: LogService
+  launch: typeof launchGame
+  runtime: RuntimePort
+  pickJava?: () => Promise<string | null>
+  pickGameDirectory?: () => Promise<string | null>
+  openVerification?: (url: string) => Promise<void>
+  writeClipboard?: (text: string) => void
+}
+export class Controller {
+  private state!: Snapshot
+  private listeners = new Set<(state: Snapshot) => void>()
+  private authRequest: AbortController | null = null
+  private editing = false
+  private refreshing = false
+  constructor(private deps: ControllerDependencies) {}
+  async initialize(): Promise<void> {
+    this.state = { settings: await this.deps.settings.read(), account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
+  }
+  async snapshot(): Promise<Snapshot> { return structuredClone({ ...this.state, logs: this.deps.logs.entries() }) }
+  subscribe(listener: (state: Snapshot) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  private emit(): void {
+    const state = structuredClone({ ...this.state, logs: this.deps.logs.entries() })
+    for (const listener of this.listeners) listener(state)
+  }
+  private idle(): void { if (this.state.operation.phase !== 'idle' || this.editing) throw new Error('Another operation is in progress or Minecraft is running. Wait before making this change.') }
+  private failure(error: unknown, code: string): Error {
+    const message = error instanceof Error ? error.message : 'The operation failed. Please retry.'
+    const publicError: PublicError = { code, message }
+    this.state.error = publicError; this.deps.logs.append('error', message)
+    if (!this.deps.accounts.current() && this.state.account.status !== 'signingIn') this.state.account = { status: 'signedOut' }
+    this.emit(); return new Error(message)
+  }
+  async refreshVersions(): Promise<void> {
+    this.idle(); if (this.refreshing) return; this.refreshing = true
+    try {
+      const list = await this.deps.versions.list()
+      this.state.releases = list.releases; this.state.offline = list.cached; this.state.error = null
+      if (this.state.operation.phase === 'idle' && !this.editing) await this.selectVersion(this.state.selectedVersionId && list.releases.some(r => r.id === this.state.selectedVersionId) ? this.state.selectedVersionId : list.latestReleaseId)
+      this.deps.logs.append('info', list.cached ? 'Using cached releases while offline.' : 'Official Minecraft release list updated.')
+    } catch (e) { this.state.offline = true; throw this.failure(e, 'VERSIONS_UNAVAILABLE') }
+    finally { this.refreshing = false; this.emit() }
+  }
+  async selectVersion(id: string): Promise<Snapshot> {
+    this.idle()
+    const release = this.state.releases.find(r => r.id === id)
+    if (!release) throw new Error('Select an available official Minecraft release.')
+    this.editing = true
+    try {
+      const installed = await this.deps.installer.inspect(release, this.state.settings.gameDirectory)
+      this.state.selectedVersionId = id
+      this.state.installedVersionIds = this.state.installedVersionIds.filter(value => value !== id)
+      if (installed) this.state.installedVersionIds.push(id)
+      this.state.error = null; this.emit(); return this.snapshot()
+    } finally { this.editing = false }
+  }
+  async saveSettings(patch: Partial<Settings>): Promise<Snapshot> {
+    this.idle(); this.editing = true
+    try {
+      const previous = this.state.settings
+      const settings = await this.deps.settings.update(patch)
+      if (settings.clientId !== previous.clientId) { this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
+      if (settings.gameDirectory !== previous.gameDirectory) this.state.installedVersionIds = []
+      this.state.settings = settings; this.state.error = null; this.emit(); return this.snapshot()
+    } catch (e) { throw this.failure(e, 'SETTINGS_INVALID') } finally { this.editing = false }
+  }
+  async chooseJava(): Promise<Snapshot> { const path = await this.deps.pickJava?.(); return path ? this.saveSettings({ javaPath: path }) : this.snapshot() }
+  async chooseGameDirectory(): Promise<Snapshot> { const path = await this.deps.pickGameDirectory?.(); return path ? this.saveSettings({ gameDirectory: path }) : this.snapshot() }
+  async signIn(): Promise<void> {
+    if (this.authRequest) throw new Error('Sign-in is already in progress.')
+    const request = new AbortController(); this.authRequest = request
+    this.state.account = { status: 'signingIn' }; this.state.error = null; this.emit()
+    try {
+      const profile = await this.deps.accounts.signIn(this.state.settings.clientId, device => {
+        this.state.account = { status: 'signingIn', device }; this.emit()
+        void this.deps.openVerification?.(device.verificationUri).catch(() => { this.state.error = { code: 'BROWSER_UNAVAILABLE', message: 'Open the Microsoft verification address shown above in your browser.' }; this.emit() })
+      }, request.signal)
+      if (!request.signal.aborted) { this.state.account = { status: 'signedIn', profile, persistent: this.deps.accounts.isPersistent() }; this.deps.logs.append('info', 'Minecraft account connected.') }
+    } catch (e) {
+      if (!request.signal.aborted) { this.state.account = { status: 'signedOut' }; throw this.failure(e, 'SIGN_IN_FAILED') }
+    } finally { if (this.authRequest === request) this.authRequest = null; this.emit() }
+  }
+  async cancelSignIn(): Promise<void> { this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' }; this.emit() }
+  async signOut(): Promise<void> { await this.cancelSignIn(); this.deps.logs.append('info', 'Signed out. Local account cache removed.'); this.emit() }
+  async restoreAccount(): Promise<void> {
+    if (!this.state.settings.clientId) return
+    try { const session = await this.deps.accounts.session(this.state.settings.clientId); this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }; this.emit() } catch { /* sign-in remains available */ }
+  }
+  private release() { const release = this.state.releases.find(r => r.id === this.state.selectedVersionId); if (!release) throw new Error('Choose an official Minecraft release first.'); return release }
+  async install(): Promise<void> {
+    this.idle(); const release = this.release()
+    this.state.operation = { phase: 'installing', versionId: release.id, progress: { completedBytes: 0, totalBytes: null, message: 'Preparing download' } }; this.state.error = null; this.emit()
+    this.deps.logs.append('info', `Installing Minecraft ${release.id}.`)
+    let lastUpdate = 0
+    try {
+      await this.deps.installer.ensure(release, this.state.settings.gameDirectory, progress => {
+        this.state.operation = { phase: 'installing', versionId: release.id, progress }
+        if (Date.now() - lastUpdate > 100 || progress.completedBytes === progress.totalBytes) { lastUpdate = Date.now(); this.emit() }
+      })
+      if (!this.state.installedVersionIds.includes(release.id)) this.state.installedVersionIds.push(release.id)
+      this.deps.logs.append('info', `Minecraft ${release.id} installation verified.`)
+    } catch (e) { this.state.installedVersionIds = this.state.installedVersionIds.filter(id => id !== release.id); throw this.failure(e, 'INSTALL_FAILED') }
+    finally { this.state.operation = { phase: 'idle' }; this.emit() }
+  }
+  async launch(): Promise<void> {
+    this.idle(); const release = this.release()
+    this.state.operation = { phase: 'launching', versionId: release.id }; this.state.error = null; this.emit()
+    let exited = false
+    try {
+      const version = await this.deps.installer.inspect(release, this.state.settings.gameDirectory)
+      if (!version) throw new Error('Install or repair this Minecraft release before launching.')
+      const session = await this.deps.accounts.session(this.state.settings.clientId)
+      this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }
+      let javaPath = this.state.settings.javaPath
+      if (!javaPath) {
+        const detected = (await this.deps.java.detect()).find(java => java.major === version.javaMajor && java.architecture === 'x64')
+        if (detected) javaPath = detected.executable
+      }
+      await this.deps.java.verify(javaPath, version.javaMajor)
+      const cap = Math.floor(this.deps.runtime.totalMemoryBytes * .75 / 1048576)
+      if (this.deps.runtime.architecture !== 'x64' || this.state.settings.maxMemoryMiB < 1024 || this.state.settings.maxMemoryMiB > cap) throw new Error('Check x64 Java and memory allocation in Settings before launching.')
+      this.deps.logs.registerSecret(session.accessToken)
+      await this.deps.launch({ settings: { ...this.state.settings, javaPath }, version, session,
+        onLog: text => { this.deps.logs.append('info', text); this.emit() },
+        onExit: code => { if (exited) return; exited = true; this.state.operation = { phase: 'idle' }; this.deps.logs.append(code === 0 ? 'info' : 'error', `Minecraft exited with ${code === null ? 'an interruption' : `code ${code}`}.`); if (code !== 0) this.state.error = { code: 'GAME_EXIT', message: `Minecraft stopped with exit code ${code ?? 'unknown'}. Check Logs and Java settings.` }; this.emit() }
+      })
+      if (!exited) { this.state.operation = { phase: 'running', versionId: release.id }; this.deps.logs.append('info', `Minecraft ${release.id} process started.`); this.emit() }
+    } catch (e) { this.state.operation = { phase: 'idle' }; throw this.failure(e, 'LAUNCH_FAILED') }
+  }
+  async copyLogs(): Promise<void> { this.deps.writeClipboard?.(this.deps.logs.entries().map(line => `${new Date(line.time).toISOString()} [${line.level}] ${line.message}`).join('\n')) }
+  api(): Omit<LauncherApi, 'subscribe'> {
+    return { getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), selectVersion: id => this.selectVersion(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+  }
+}

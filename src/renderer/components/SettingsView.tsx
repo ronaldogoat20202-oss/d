@@ -8,7 +8,7 @@ export function SettingsView({ settings, api }: { settings: Settings | null; api
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setForm(settings) }, [settings])
+  useEffect(() => { setForm(settings) }, [settings?.clientId, settings?.javaPath, settings?.gameDirectory, settings?.maxMemoryMiB])
   if (!form) return <section className="panel"><h2>Launcher preferences</h2><p>Open the desktop app to configure your launcher.</p></section>
   const edit = (patch: Partial<Settings>) => { setForm({ ...form, ...patch }); setSaved(false) }
   async function choose(method: 'chooseJava' | 'chooseGameDirectory') {

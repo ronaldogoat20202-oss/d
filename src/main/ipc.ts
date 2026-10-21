@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { LauncherApi } from '../shared/contracts'
 
-export const PUBLIC_METHODS = ['getSnapshot', 'saveSettings', 'selectVersion', 'signIn', 'cancelSignIn',
+export const PUBLIC_METHODS = ['getSnapshot', 'refreshVersions', 'saveSettings', 'selectVersion', 'signIn', 'cancelSignIn',
   'signOut', 'chooseJava', 'chooseGameDirectory', 'install', 'launch', 'copyLogs'] as const
 
 export function assertTrustedSender(

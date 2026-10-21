@@ -1,0 +1,30 @@
+import { afterEach, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { generateArguments } from '@xmcl/core'
+import { minecraftFixture } from '../fixtures/minecraft'
+import { InstallService } from '../../src/main/services/installer'
+import { makeLaunchOptions, guardSpawn } from '../../src/main/adapters/minecraft-launcher'
+const roots: string[] = []
+afterEach(async () => { await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))) })
+it('constructs authenticated arguments with client ID and XUID and preserves spaced paths', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'orbit game ')); roots.push(root)
+  const fixture = minecraftFixture()
+  const platform = { name: 'windows' as const, arch: 'x64', version: '10.0.0' }
+  const installed = await new InstallService(fixture.fetcher, platform).ensure(fixture.release, root, () => {})
+  const options = await makeLaunchOptions({ settings: { clientId: 'own-public-id', javaPath: 'C:\\Program Files\\Java\\bin\\java.exe', gameDirectory: root, maxMemoryMiB: 2048 }, version: installed, session: { clientId: 'own-public-id', xuid: '123456', accessToken: 'private-token', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } } }, platform)
+  const args = await generateArguments(options)
+  expect(args[0]).toBe('C:\\Program Files\\Java\\bin\\java.exe')
+  expect(args).toContain('own-public-id'); expect(args).toContain('123456')
+  expect(args.join(' ')).not.toMatch(/\$\{clientid\}|\$\{auth_xuid\}/)
+  expect(args).toContain('OrbitPlayer')
+})
+it('rejects missing credentials rather than using the core offline fallback', async () => {
+  await expect(makeLaunchOptions({ settings: { clientId: '', javaPath: '/java', gameDirectory: '/game', maxMemoryMiB: 2048 }, version: { id: 'x', root: '/game', javaMajor: 21 }, session: { accessToken: '', clientId: '', xuid: '', profile: { id: '', name: '' } } })).rejects.toThrow(/sign in|authenticated/i)
+})
+it('refuses unresolved placeholders and shell execution at the process boundary', () => {
+  expect(() => guardSpawn('/java', ['${auth_xuid}'], { shell: false })).toThrow(/unresolved/i)
+  expect(() => guardSpawn('/java', ['Main'], { shell: true })).toThrow(/shell/i)
+  expect(() => guardSpawn('/java path/java', ['argument with spaces'], { shell: false })).not.toThrow()
+})

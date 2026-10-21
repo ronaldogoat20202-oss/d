@@ -31,6 +31,7 @@ export interface Snapshot {
 }
 export interface LauncherApi {
   getSnapshot(): Promise<Snapshot>
+  refreshVersions(): Promise<void>
   saveSettings(patch: Partial<Settings>): Promise<Snapshot>
   selectVersion(id: string): Promise<Snapshot>
   signIn(): Promise<void>

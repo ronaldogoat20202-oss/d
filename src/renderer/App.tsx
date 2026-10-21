@@ -2,11 +2,17 @@ import { useEffect, useState } from 'react'
 import { ArrowUpRight, Box, Compass, FileText, Settings2, Sparkles } from 'lucide-react'
 import type { Snapshot } from '../shared/contracts'
 import { SettingsView } from './components/SettingsView'
+import { PlayView } from './components/PlayView'
+import { LogsView } from './components/LogsView'
 
 export default function App() {
   const [page, setPage] = useState<'Play' | 'Settings' | 'Logs'>('Play')
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [error, setError] = useState('')
+  function action(operation: () => Promise<unknown>): void {
+    setError('')
+    void operation().catch(error => setError((error as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')))
+  }
   useEffect(() => {
     if (!window.orbit) return
     window.orbit.getSnapshot().then(setSnapshot).catch(() => setError('Could not connect to the launcher.'))
@@ -34,10 +40,10 @@ export default function App() {
             <div className="voxel-scene" aria-hidden="true"><div className="pixel-sun"/><div className="voxel-cloud cloud-one"/><div className="voxel-cloud cloud-two"/><div className="voxel-mountain back-mountain"/><div className="voxel-mountain front-mountain"/><div className="voxel-land land-back"/><div className="voxel-land land-front"/><div className="voxel-tree tree-one"><i/><b/></div><div className="voxel-tree tree-two"><i/><b/></div><div className="scene-grid"/></div>
             <div className="hero-bottom"><span><span className="status-dot"/> Official game files</span><span>ONE CLICK CLOSER TO YOUR WORLD</span></div>
           </section>
-          <section className="launch-card"><div><span className="field-label">GET READY TO EXPLORE</span><h3>{snapshot ? 'Choose your next adventure' : 'Your launchpad is waiting'}</h3><p>{!window.orbit ? 'Open the desktop app to connect to Minecraft.' : 'No versions loaded yet.'}</p></div><button className="primary" disabled><Compass size={18}/> Select a version</button></section>
+          <PlayView snapshot={snapshot} api={window.orbit} onAction={action} onSettings={() => setPage('Settings')}/>
           <div className="info-row"><span><Box size={17}/> Vanilla Minecraft. Your own space.</span><span>Built for the way you play <ArrowUpRight size={15}/></span></div>
-        </> : page === 'Settings' ? <SettingsView settings={snapshot?.settings || null} api={window.orbit}/> : <section className="panel log-panel"><div className="panel-heading"><h2>Launcher activity</h2><span className="pill">LIVE</span></div><p>No activity yet. Your next adventure starts with a launch.</p></section>}
-        {error && <div role="alert" className="error-banner">{error}</div>}
+        </> : page === 'Settings' ? <SettingsView settings={snapshot?.settings || null} api={window.orbit}/> : <LogsView logs={snapshot?.logs || []} onCopy={() => { if (window.orbit) action(() => window.orbit!.copyLogs()) }}/ >}
+        {(error || snapshot?.error) && <div role="alert" className="error-banner">{error || snapshot?.error?.message}</div>}
       </div>
       <footer className="app-footer"><span><span className="status-dot"/> A LITTLE SPACE FOR BIG IDEAS</span><span>Independent launcher · Not affiliated with Mojang or Microsoft</span></footer>
     </main>
