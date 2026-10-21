@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, win32 } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Settings } from '../../shared/contracts'
@@ -41,7 +41,12 @@ export class SettingsStore {
     if (this.cached) return { ...this.cached }
     const defaults = this.defaults()
     let text: string
-    try { text = await readFile(join(this.directory, 'settings.json'), 'utf8') }
+    try {
+      // Windows can report ENOENT for a child of a regular file. Check the
+      // preferences directory before treating a missing file as first launch.
+      if (!(await stat(this.directory)).isDirectory()) throw new Error('Preferences path is not a directory.')
+      text = await readFile(join(this.directory, 'settings.json'), 'utf8')
+    }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Unable to read launcher preferences. Check the application-data directory permissions.')
       this.cached = defaults
