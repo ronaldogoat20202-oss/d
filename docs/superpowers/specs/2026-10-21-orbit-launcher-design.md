@@ -1,7 +1,7 @@
 # Orbit Launcher design
 
 Date: 2026-10-21
-Status: approved conversational design, written specification pending review
+Status: approved for implementation planning; implementation plan pending review
 
 ## Purpose and scope
 
