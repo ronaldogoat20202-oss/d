@@ -1,3 +1,4 @@
+export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
   clientId: string
   javaPath: string
