@@ -11,13 +11,15 @@
     "node": ">=24.15.0 <25"
   },
   "scripts": {
+    "postinstall": "install-electron",
     "dev": "electron-vite dev",
     "start": "electron .",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:portable": "npm run build && electron-builder --win portable --x64 --publish never"
   },
   "dependencies": {
     "@azure/msal-node": "7.1.0",

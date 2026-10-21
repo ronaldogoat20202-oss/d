@@ -1,0 +1,26 @@
+appId: dev.orbit.launcher
+productName: Orbit Launcher
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+asar: true
+npmRebuild: false
+toolsets:
+  wine: '1.0.1'
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Orbit-Launcher-${version}-Setup.${ext}
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+portable:
+  artifactName: Orbit-Launcher-${version}-Portable.${ext}
