@@ -4,7 +4,7 @@ async function injectBridge(page: Page, offline = false) {
   await page.addInitScript(({ offline }) => {
     let state = {
       settings: { clientId: '', javaPath: '', gameDirectory: 'C:\\Orbit\\Minecraft', maxMemoryMiB: 2048 },
-      account: { status: 'signedOut' } as Record<string, unknown>,
+      accounts: [] as {kind:string;id:string;name:string}[], microsoftConfigured: false, account: { status: 'signedOut' } as Record<string, unknown>,
       releases: offline ? [] : [{ id: 'fixture-release', url: 'https://piston-meta.mojang.com/fixture.json', sha1: 'a'.repeat(40), releasedAt: '2026-01-01' }],
       selectedVersionId: offline ? null : 'fixture-release', installedVersionIds: [] as string[],
       operation: { phase: 'idle' } as Record<string, unknown>, logs: [] as { time: number; level: string; message: string }[], error: null, offline
@@ -12,13 +12,16 @@ async function injectBridge(page: Page, offline = false) {
     const listeners = new Set<(s: unknown) => void>()
     const emit = () => { const copy = structuredClone(state); for (const listener of listeners) listener(copy) }
     ;(window as unknown as { orbit: unknown }).orbit = {
+      createOfflineAccount: async (name: string) => { const profile = {kind:'offline', id:'b50ad385829d3141a2167e7d7539ba7f', name}; state.accounts.push(profile); state.account = {status:'signedIn',profile,persistent:true}; emit(); return structuredClone(state) },
+      selectAccount: async (kind: string,id: string) => { state.account = {status:'signedIn',profile:state.accounts.find(a=>a.kind===kind&&a.id===id)}; emit(); return structuredClone(state) },
+      removeAccount: async (kind: string,id: string) => { state.accounts=state.accounts.filter(a=>a.kind!==kind||a.id!==id); state.account={status:'signedOut'}; emit(); return structuredClone(state) },
       getSnapshot: async () => structuredClone(state),
       subscribe: (fn: (s: unknown) => void) => { listeners.add(fn); return () => listeners.delete(fn) },
       saveSettings: async (patch: typeof state.settings) => { state.settings = { ...state.settings, ...patch }; emit(); return structuredClone(state) },
       selectVersion: async (id: string) => { state.selectedVersionId = id; emit(); return structuredClone(state) },
       chooseJava: async () => structuredClone(state), chooseGameDirectory: async () => structuredClone(state),
       refreshVersions: async () => { emit() },
-      signIn: async () => { state.account = { status: 'signedIn', persistent: false, profile: { id: 'a'.repeat(32), name: 'RendererTest' } }; emit() },
+      signIn: async () => { state.account = { status: 'signedIn', persistent: false, profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'RendererTest' } }; emit() },
       cancelSignIn: async () => { state.account = { status: 'signedOut' }; emit() },
       signOut: async () => { state.account = { status: 'signedOut' }; emit() },
       install: async () => {
@@ -32,20 +35,21 @@ async function injectBridge(page: Page, offline = false) {
     }
   }, { offline })
 }
-test('install, configure, sign in, and launch through the public interface', async ({ page }) => {
+test('install, configure, create a local account, and launch through the public interface', async ({ page }) => {
   await injectBridge(page); await page.goto('/')
   await expect(page.getByRole('heading', { name: /your next world/i })).toBeVisible()
   await page.getByRole('button', { name: /install minecraft/i }).click()
   await expect(page.getByText('Installed & verified')).toBeVisible()
   await expect(page.getByRole('button', { name: /play minecraft/i })).toBeDisabled()
   await page.getByRole('button', { name: /^settings$/i }).click()
-  await page.getByLabel('Microsoft application client ID').fill('00000000-0000-4000-8000-000000000001')
   await page.getByLabel('Java executable', { exact: true }).fill('C:\\Java 21\\bin\\java.exe')
   await page.getByRole('button', { name: /save preferences/i }).click()
   await expect(page.getByText('Preferences saved', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: /^play$/i }).click()
-  await page.getByRole('button', { name: /sign in with Microsoft/i }).click()
-  await expect(page.getByText('RendererTest')).toBeVisible()
+  await page.getByRole('button', {name:/create offline profile/i}).click()
+  await page.getByLabel('Offline username').fill('RendererTest')
+  await page.getByRole('button', {name:/^create profile$/i}).click()
+  await expect(page.getByText('RendererTest', {exact:true})).toBeVisible()
   await page.getByRole('button', { name: /play minecraft/i }).click()
   await expect(page.getByRole('button', { name: /Minecraft is running/i })).toBeDisabled()
   await page.getByRole('button', { name: /^logs$/i }).click()

@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi, type Mock } from 'vitest'
 import { AccountService, type AuthPort } from '../../src/main/services/accounts'
 const id = '00000000-0000-4000-8000-000000000001'
-const session = { accessToken: 'private-token', clientId: id, xuid: '12345', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } }
+const session = { kind: 'microsoft' as const, accessToken: 'private-token', clientId: id, xuid: '12345', profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'OrbitPlayer' } }
 let port: AuthPort
 let cache: { load: Mock<() => Promise<string | null>>; save: Mock<(value: string) => Promise<boolean>>; clear: Mock<() => Promise<void>> }
 beforeEach(() => {
@@ -13,7 +13,7 @@ it('requires the user application ID and returns only a public Minecraft profile
   await expect(accounts.signIn('', async () => {}, new AbortController().signal)).rejects.toThrow(/client ID/)
   expect(await accounts.signIn(id, async () => {}, new AbortController().signal)).toEqual(session.profile)
   expect(JSON.stringify(accounts.current())).not.toContain('private-token')
-  expect((await accounts.session(id)).accessToken).toBe('private-token')
+  expect(await accounts.session(id)).toMatchObject({kind:'microsoft',accessToken:'private-token'})
 })
 it.each(['expired', 'cancelled', 'Xbox denied', 'XSTS denied', 'no Minecraft entitlement', 'profile missing'])('leaves no account after authentication failure: %s', async reason => {
   port.authenticate = async () => { throw new Error(reason) }

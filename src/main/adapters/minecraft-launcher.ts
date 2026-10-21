@@ -10,13 +10,22 @@ export function guardSpawn(executable: string, args: readonly string[], options:
 }
 export async function makeLaunchOptions(input: LaunchConfiguration, platform: Platform = getPlatform()): Promise<LaunchOption> {
   const { settings, version, session } = input
-  if (!session.accessToken || !session.profile.id || !session.profile.name || !session.clientId || !session.xuid) throw new Error('Sign in with an authenticated Minecraft account before launching.')
+  if (!session.profile.id || !session.profile.name || (session.kind === 'microsoft' && (!session.accessToken || !session.clientId || !session.xuid))) throw new Error('Sign in with an authenticated Minecraft account before launching.')
   const resolved = await Version.parse(version.root, version.id, platform)
+  if (session.kind === 'offline') {
+    // Core leaves empty substitutions unresolved. Offline sessions have no
+    // Microsoft client identity or XUID, so omit those optional arguments.
+    const strip = (args: typeof resolved.arguments.game): typeof resolved.arguments.game => args.flatMap<(typeof args)[number]>((arg, i, all) => {
+      if (typeof arg === 'string') return ['--clientId', '--xuid'].includes(arg) || (typeof all[i - 1] === 'string' && ['--clientId', '--xuid'].includes(all[i - 1] as string)) ? [] : [arg]
+      return [{ ...arg, value: Array.isArray(arg.value) ? strip(arg.value) as string[] : arg.value }]
+    })
+    resolved.arguments.game = strip(resolved.arguments.game)
+  }
   return {
     gamePath: settings.gameDirectory, resourcePath: version.root, version: resolved, javaPath: settings.javaPath,
-    gameProfile: session.profile, accessToken: session.accessToken, minMemory: 512, maxMemory: settings.maxMemoryMiB,
+    gameProfile: session.profile, accessToken: session.kind === 'microsoft' ? session.accessToken : '0', userType: session.kind === 'microsoft' ? undefined : 'legacy', minMemory: 512, maxMemory: settings.maxMemoryMiB,
     launcherName: 'Orbit', launcherBrand: 'Orbit', platform,
-    features: { orbit_auth: { clientid: session.clientId, auth_xuid: session.xuid } },
+    features: { orbit_auth: { clientid: session.kind === 'microsoft' ? session.clientId : '', auth_xuid: session.kind === 'microsoft' ? session.xuid : '' } },
     extraExecOption: { shell: false, windowsHide: true }
   }
 }

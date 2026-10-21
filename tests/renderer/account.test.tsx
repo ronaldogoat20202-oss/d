@@ -3,13 +3,21 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { AccountPanel } from '../../src/renderer/components/AccountPanel'
-it('explains missing configuration and shows expiring browser instructions', async () => {
-  const openSettings = vi.fn()
-  const props = { onSignIn: vi.fn(), onSignOut: vi.fn(), onCancel: vi.fn(), onSettings: openSettings }
-  const { rerender } = render(<AccountPanel account={{ status: 'signedOut' }} hasClientId={false} {...props}/>)
-  await userEvent.click(screen.getByRole('button', { name: /configure sign-in/i }))
-  expect(openSettings).toHaveBeenCalled()
-  rerender(<AccountPanel account={{ status: 'signingIn', device: { userCode: 'TEST-CODE', verificationUri: 'https://microsoft.com/devicelogin', expiresAt: Date.now() - 1 } }} hasClientId {...props}/>)
-  expect(screen.getByText('TEST-CODE')).toBeVisible()
-  expect(screen.getByText(/expired/i)).toBeVisible()
+it('offers local accounts without publisher configuration', async () => {
+  const create = vi.fn()
+  render(<AccountPanel account={{ status: 'signedOut' }} accounts={[]} microsoftConfigured={false} onSignIn={vi.fn()} onSignOut={vi.fn()} onCancel={vi.fn()} onCreate={create} onSelect={vi.fn()} onRemove={vi.fn()}/>)
+  expect(screen.getByRole('button', { name: /sign in with microsoft/i })).toBeDisabled()
+  expect(screen.getByText(/publisher|registration/i)).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: /create offline profile/i }))
+  await userEvent.type(screen.getByLabelText(/offline username/i), 'Local_Player')
+  await userEvent.click(screen.getByRole('button', { name: /^create profile$/i }))
+  expect(create).toHaveBeenCalledWith('Local_Player')
+  expect(screen.getByText(/single.player/i)).toBeVisible()
+})
+it('shows browser waiting and cancellation', async () => {
+  const cancel = vi.fn()
+  render(<AccountPanel account={{ status: 'signingIn' }} accounts={[]} microsoftConfigured onSignIn={vi.fn()} onSignOut={vi.fn()} onCancel={cancel} onCreate={vi.fn()} onSelect={vi.fn()} onRemove={vi.fn()}/>)
+  expect(screen.getByText('Finish signing in in your browser')).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
+  expect(cancel).toHaveBeenCalled()
 })

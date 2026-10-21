@@ -15,7 +15,7 @@ it('shows saved values and reports validation errors accessibly', async () => {
   await userEvent.click(screen.getByRole('button', { name: /save preferences/i }))
   expect(await screen.findByRole('alert')).toHaveTextContent(/1024/)
 })
-it('preserves an unsaved application ID when browsing persists a Java path', async () => {
+it('preserves unsaved memory allocation when browsing persists a Java path', async () => {
   function Harness() {
     const [settings, setSettings] = useState({ clientId: '', javaPath: '', gameDirectory: 'C:\\Orbit', maxMemoryMiB: 2048 })
     const api = {
@@ -26,9 +26,10 @@ it('preserves an unsaved application ID when browsing persists a Java path', asy
     return <SettingsView settings={settings} api={api}/>
   }
   render(<Harness/>)
-  const id = '00000000-0000-4000-8000-000000000001'
-  await userEvent.type(screen.getByLabelText('Microsoft application client ID'), id)
+  expect(screen.queryByLabelText('Microsoft application client ID')).not.toBeInTheDocument()
+  await userEvent.clear(screen.getByLabelText(/memory allocation/i))
+  await userEvent.type(screen.getByLabelText(/memory allocation/i), '4096')
   await userEvent.click(screen.getByRole('button', { name: 'Browse Java executable' }))
   expect(screen.getByLabelText('Java executable')).toHaveValue('C:\\Java 21\\bin\\java.exe')
-  expect(screen.getByLabelText('Microsoft application client ID')).toHaveValue(id)
+  expect(screen.getByLabelText(/memory allocation/i)).toHaveValue(4096)
 })

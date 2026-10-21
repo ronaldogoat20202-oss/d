@@ -6,6 +6,7 @@ import { Controller, type ControllerDependencies } from '../../src/main/controll
 import { SettingsStore } from '../../src/main/services/settings'
 import { InstallService } from '../../src/main/services/installer'
 import { JavaService } from '../../src/main/services/java'
+import { AccountStore } from '../../src/main/services/account-store'
 import { AccountService } from '../../src/main/services/accounts'
 import { LogService } from '../../src/main/services/logs'
 import { minecraftFixture } from '../fixtures/minecraft'
@@ -17,14 +18,14 @@ async function setup() {
   const fixture = minecraftFixture()
   const runtime = { platform: 'win32' as const, architecture: 'x64', totalMemoryBytes: 8 * 1024 ** 3 }
   const id = '00000000-0000-4000-8000-000000000001'
-  const session = { clientId: id, xuid: '12345', accessToken: 'private-token', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } }
+  const session = { kind: 'microsoft' as const, clientId: id, xuid: '12345', accessToken: 'private-token', profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'OrbitPlayer' } }
   const installer = new InstallService(fixture.fetcher, { name: 'windows', arch: 'x64', version: '10.0.0' })
   const deps: ControllerDependencies = {
     settings: new SettingsStore(root, runtime),
     versions: { list: async () => ({ releases: [fixture.release], latestReleaseId: 'fixture', cached: false }) },
     installer, runtime,
     java: new JavaService(async () => 'java.version = 21.0.1\nos.arch = amd64'),
-    accounts: new AccountService({ authenticate: async () => session, refresh: async () => session, serialize: () => 'cache', deserialize: () => {}, clear: () => {} }, { load: async () => null, save: async () => false, clear: async () => {} }),
+    accounts: new AccountService({ authenticate: async () => session, refresh: async () => session, serialize: () => 'cache', deserialize: () => {}, clear: () => {} }, { load: async () => null, save: async () => false, clear: async () => {} }, new AccountStore(root)),
     logs: new LogService(), launch: vi.fn(async () => ({} as never))
   }
   const controller = new Controller(deps)
@@ -39,7 +40,7 @@ it('installs without account/Java and blocks duplicate operations and busy confi
   expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected', 'rejected'])
   expect(ensure).toHaveBeenCalledTimes(1)
   expect((await controller.snapshot()).installedVersionIds).toContain('fixture')
-  await expect(controller.launch()).rejects.toThrow(/sign in|client ID/i)
+  await expect(controller.launch()).rejects.toThrow(/account|sign in|client ID/i)
 })
 it('requires Java and refreshes authentication before spawning; resets after game exits', async () => {
   const { controller, deps, id } = await setup()
@@ -112,4 +113,21 @@ it('removes corrupt installed state and repairs the release with the Install act
   expect(deps.launch).not.toHaveBeenCalled()
   await controller.install()
   expect((await controller.snapshot()).installedVersionIds).toContain('fixture')
+})
+it('does not spawn after the selected offline account changes', async () => {
+  const { controller, deps } = await setup()
+  await controller.install(); await controller.saveSettings({ javaPath: '/java21' })
+  await controller.createOfflineAccount('First')
+  let resume!: () => void
+  let spawns = 0
+  deps.launch = vi.fn(async input => {
+    await new Promise<void>(resolve => { resume = resolve })
+    input.assertAuthorized(); spawns++
+    return {} as never
+  })
+  const pending = controller.launch()
+  await vi.waitFor(() => expect(resume).toBeDefined())
+  await controller.createOfflineAccount('Second'); resume()
+  await expect(pending).rejects.toThrow(/account|cancel/i)
+  expect(spawns).toBe(0)
 })

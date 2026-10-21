@@ -3,7 +3,7 @@ import { MicrosoftAuthenticator, MojangClient } from '@xmcl/user'
 import { randomBytes } from 'node:crypto'
 import { openOAuthCallback } from '../services/oauth-callback'
 import type { AuthPort } from '../services/accounts'
-import type { GameSession } from '../services/types'
+import type { MicrosoftSession } from '../services/types'
 import { networkFetch, type FetchPort } from '../services/network'
 
 const scopes = ['XboxLive.signin', 'offline_access']
@@ -31,7 +31,7 @@ export class MinecraftAuthAdapter implements AuthPort {
   serialize(): string { return this.client?.getTokenCache().serialize() || '{}' }
   deserialize(id: string, cache: string): void { this.application(id).getTokenCache().deserialize(cache) }
   clear(): void { this.client = null; this.id = '' }
-  async authenticate(id: string, openBrowser: (url: string) => Promise<void>, signal: AbortSignal): Promise<GameSession> {
+  async authenticate(id: string, openBrowser: (url: string) => Promise<void>, signal: AbortSignal): Promise<MicrosoftSession> {
     const application = this.application(id)
     const state = randomBytes(32).toString('hex')
     const callback = await openOAuthCallback({ state, signal })
@@ -50,7 +50,7 @@ export class MinecraftAuthAdapter implements AuthPort {
       throw new Error('Microsoft browser sign-in failed or expired. Check Orbit application registration and your connection, then try again.')
     } finally { await callback.close() }
   }
-  async refresh(id: string, signal: AbortSignal): Promise<GameSession> {
+  async refresh(id: string, signal: AbortSignal): Promise<MicrosoftSession> {
     const application = this.application(id)
     const accounts = await application.getTokenCache().getAllAccounts()
     if (!accounts.length) throw new Error('Please sign in with Microsoft first.')
@@ -58,7 +58,7 @@ export class MinecraftAuthAdapter implements AuthPort {
     if (!token?.accessToken) throw new Error('Please sign in again.')
     return this.exchange(token.accessToken, id, signal)
   }
-  private async exchange(token: string, id: string, signal: AbortSignal): Promise<GameSession> {
+  private async exchange(token: string, id: string, signal: AbortSignal): Promise<MicrosoftSession> {
     const authFetch: typeof fetch = (input, init) => this.fetcher(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, init)
     const xbox = new MicrosoftAuthenticator({ fetch: authFetch })
     const minecraft = new MojangClient({ fetch: authFetch as unknown as typeof import('undici').fetch })
@@ -71,7 +71,7 @@ export class MinecraftAuthAdapter implements AuthPort {
       if (!ownership.items?.some(item => ['game_minecraft', 'product_minecraft'].includes(item.name))) throw new AuthenticationFailure('This Microsoft account does not own Minecraft Java Edition. Use an account with a Java entitlement.')
       const profile = await minecraft.getProfile(game.access_token, signal)
       if (!profile.id || !profile.name || !xuid) throw new AuthenticationFailure('Minecraft or Xbox did not return a complete player profile. Complete account setup and try again.')
-      return { accessToken: game.access_token, profile: { id: profile.id, name: profile.name }, clientId: id, xuid }
+      return { kind: 'microsoft', accessToken: game.access_token, profile: { kind: 'microsoft', id: profile.id, name: profile.name }, clientId: id, xuid }
     } catch (error) {
       if (error instanceof AuthenticationFailure) throw error
       throw new AuthenticationFailure('Xbox or Minecraft authorization failed. Check your Xbox account setup, Minecraft application API access, and connection, then retry.')

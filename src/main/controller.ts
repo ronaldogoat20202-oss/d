@@ -1,4 +1,4 @@
-import type { LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
+import type { AccountKind, LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
 import type { SettingsStore } from './services/settings'
 import type { VersionService } from './services/versions'
 import type { InstallService } from './services/installer'
@@ -14,7 +14,7 @@ export interface ControllerDependencies {
   settings: Pick<SettingsStore, 'read' | 'update'>
   versions: Pick<VersionService, 'list'>
   installer: Pick<InstallService, 'ensure' | 'inspect'>
-  accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent'>
+  accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent' | 'index' | 'createOffline' | 'select' | 'remove' | 'cancelSignIn'>
   java: Pick<JavaService, 'verify' | 'detect'>
   logs: LogService
   launch: typeof launchGame
@@ -35,7 +35,7 @@ export class Controller {
   async initialize(): Promise<void> {
     const stored = await this.deps.settings.read()
     const settings = { ...stored, clientId: resolveClientId(this.deps.configuredClientId || '', stored.clientId) || '' }
-    this.state = { settings, account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
+    this.state = { settings, accounts: (await this.deps.accounts.index()).accounts, microsoftConfigured: !!settings.clientId, account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
   }
   async snapshot(): Promise<Snapshot> { return structuredClone({ ...this.state, logs: this.deps.logs.entries() }) }
   subscribe(listener: (state: Snapshot) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -82,7 +82,7 @@ export class Controller {
       const settings = { ...saved, clientId: resolveClientId(this.deps.configuredClientId || '', saved.clientId) || '' }
       if (settings.clientId !== previous.clientId) { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
       if (settings.gameDirectory !== previous.gameDirectory) this.state.installedVersionIds = []
-      this.state.settings = settings; this.state.error = null; this.emit(); return this.snapshot()
+      this.state.settings = settings; this.state.microsoftConfigured = !!settings.clientId; this.state.error = null; this.emit(); return this.snapshot()
     } catch (e) { throw this.failure(e, 'SETTINGS_INVALID') } finally { this.editing = false }
   }
   async chooseJava(): Promise<Snapshot> { const path = await this.deps.pickJava?.(); return path ? this.saveSettings({ javaPath: path }) : this.snapshot() }
@@ -97,17 +97,36 @@ export class Controller {
         if (!this.deps.openVerification) throw new Error('System browser is unavailable.')
         await this.deps.openVerification(url)
       }, request.signal)
-      if (!request.signal.aborted) { this.state.account = { status: 'signedIn', profile, persistent: this.deps.accounts.isPersistent() }; this.deps.logs.append('info', 'Minecraft account connected.') }
+      if (!request.signal.aborted) { this.state.account = { status: 'signedIn', profile, persistent: this.deps.accounts.isPersistent() }; this.state.accounts = (await this.deps.accounts.index()).accounts; this.deps.logs.append('info', 'Minecraft account connected.') }
     } catch (e) {
       if (!request.signal.aborted) { this.state.account = { status: 'signedOut' }; throw this.failure(e, 'SIGN_IN_FAILED') }
     } finally { if (this.authRequest === request) this.authRequest = null; this.emit() }
   }
-  async cancelSignIn(): Promise<void> { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' }; this.emit() }
-  async signOut(): Promise<void> { await this.cancelSignIn(); this.deps.logs.append('info', 'Signed out. Local account cache removed.'); this.emit() }
+  async cancelSignIn(): Promise<void> { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.cancelSignIn(); this.state.account = { status: 'signedOut' }; this.emit() }
+  async signOut(): Promise<void> { await this.cancelSignIn(); await this.deps.accounts.signOut(); this.state.accounts = (await this.deps.accounts.index()).accounts; this.deps.logs.append('info', 'Signed out. Local account cache removed.'); this.emit() }
   async restoreAccount(): Promise<void> {
-    if (!this.state.settings.clientId) return
+    const selected = (await this.deps.accounts.index()).selected
+    if (!selected && !this.state.settings.clientId) return
     const revision = this.accountRevision
     try { const session = await this.deps.accounts.session(this.state.settings.clientId); if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id) return; this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }; this.emit() } catch { /* sign-in remains available */ }
+  }
+  shutdown(): void { this.accountRevision++; this.authRequest?.abort(); this.listeners.clear() }
+  async createOfflineAccount(name: string): Promise<Snapshot> {
+    this.accountRevision++; this.authRequest?.abort()
+    const profile = await this.deps.accounts.createOffline(name)
+    this.state.account = { status: 'signedIn', profile, persistent: true }
+    this.state.accounts = (await this.deps.accounts.index()).accounts; this.state.error = null; this.emit(); return this.snapshot()
+  }
+  async selectAccount(kind: AccountKind, id: string): Promise<Snapshot> {
+    this.accountRevision++; this.authRequest?.abort()
+    const profile = await this.deps.accounts.select(kind, id)
+    this.state.account = { status: 'signedIn', profile, persistent: this.deps.accounts.isPersistent() }
+    this.state.error = null; this.emit(); return this.snapshot()
+  }
+  async removeAccount(kind: AccountKind, id: string): Promise<Snapshot> {
+    this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.remove(kind, id)
+    if (!this.deps.accounts.current()) this.state.account = { status: 'signedOut' }
+    this.state.accounts = (await this.deps.accounts.index()).accounts; this.emit(); return this.snapshot()
   }
   private release() { const release = this.state.releases.find(r => r.id === this.state.selectedVersionId); if (!release) throw new Error('Choose an official Minecraft release first.'); return release }
   async install(): Promise<void> {
@@ -135,7 +154,7 @@ export class Controller {
       if (!version) { this.state.installedVersionIds = this.state.installedVersionIds.filter(id => id !== release.id); throw new Error('Install or repair this Minecraft release before launching.') }
       const session = await this.deps.accounts.session(this.state.settings.clientId)
       const assertAuthorized = () => {
-        if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id || this.state.settings.clientId !== session.clientId)
+        if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id || (session.kind === 'microsoft' && this.state.settings.clientId !== session.clientId))
           throw new Error('Your account changed while preparing Minecraft. Sign in and try again.')
       }
       assertAuthorized()
@@ -148,7 +167,7 @@ export class Controller {
       await this.deps.java.verify(javaPath, version.javaMajor)
       const cap = Math.floor(this.deps.runtime.totalMemoryBytes * .75 / 1048576)
       if (this.deps.runtime.architecture !== 'x64' || this.state.settings.maxMemoryMiB < 1024 || this.state.settings.maxMemoryMiB > cap) throw new Error('Check x64 Java and memory allocation in Settings before launching.')
-      this.deps.logs.registerSecret(session.accessToken)
+      if (session.kind === 'microsoft') this.deps.logs.registerSecret(session.accessToken)
       assertAuthorized()
       await this.deps.launch({ settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
         onLog: text => { this.deps.logs.append('info', text); this.emit() },
@@ -159,6 +178,6 @@ export class Controller {
   }
   async copyLogs(): Promise<void> { this.deps.writeClipboard?.(this.deps.logs.entries().map(line => `${new Date(line.time).toISOString()} [${line.level}] ${line.message}`).join('\n')) }
   api(): Omit<LauncherApi, 'subscribe'> {
-    return { getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), selectVersion: id => this.selectVersion(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+    return { createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), selectVersion: id => this.selectVersion(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
   }
 }

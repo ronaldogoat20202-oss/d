@@ -9,6 +9,7 @@ import { Controller } from './controller'
 import { VersionService } from './services/versions'
 import { InstallService } from './services/installer'
 import { JavaService } from './services/java'
+import { AccountStore } from './services/account-store'
 import { AccountService } from './services/accounts'
 import { CredentialStore } from './services/credentials'
 import { MinecraftAuthAdapter } from './adapters/minecraft-auth'
@@ -30,7 +31,7 @@ async function openWindow(): Promise<void> {
     configuredClientId: typeof __ORBIT_MICROSOFT_CLIENT_ID__ === 'string' ? __ORBIT_MICROSOFT_CLIENT_ID__ : '',
     settings: new SettingsStore(directory, runtime), versions: new VersionService(join(directory, 'cache')),
     installer: new InstallService(), java: new JavaService(), runtime, logs: new LogService(), launch: launchGame,
-    accounts: new AccountService(new MinecraftAuthAdapter(), new CredentialStore(directory, safeStorage)),
+    accounts: new AccountService(new MinecraftAuthAdapter(), new CredentialStore(directory, safeStorage), new AccountStore(directory)),
     pickJava: () => pick(['openFile'], 'Choose the Java executable (java.exe)'),
     pickGameDirectory: () => pick(['openDirectory', 'createDirectory'], 'Choose Minecraft game folder'),
     openVerification: async url => { if (!allowedExternalUrl(url)) throw new Error('Unexpected verification page.'); await shell.openExternal(url) },
@@ -39,7 +40,7 @@ async function openWindow(): Promise<void> {
   await controller.initialize()
   registerIpc(ipcMain, window, renderer, controller.api())
   const unsubscribe = controller.subscribe(state => { if (!window.isDestroyed()) window.webContents.send('orbit:state', state) })
-  window.once('closed', () => { unsubscribe(); void controller.cancelSignIn() })
+  window.once('closed', () => { unsubscribe(); controller.shutdown() })
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event, url) => { if (url !== renderer) event.preventDefault() })

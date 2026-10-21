@@ -1,3 +1,4 @@
+import type { AccountIdentity, AccountKind } from './accounts'
 export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
   clientId: string
@@ -6,7 +7,7 @@ export interface Settings {
   maxMemoryMiB: number
 }
 export interface Release { id: string; url: string; sha1: string; releasedAt: string }
-export interface AccountSummary { id: string; name: string }
+export type AccountSummary = AccountIdentity
 export interface DeviceInstructions { userCode: string; verificationUri: string; expiresAt: number }
 export type AccountState =
   | { status: 'signedOut' }
@@ -21,6 +22,8 @@ export interface PublicError { code: string; message: string }
 export interface LogEntry { time: number; level: 'info' | 'error'; message: string }
 export interface Snapshot {
   settings: Settings
+  accounts: AccountIdentity[]
+  microsoftConfigured: boolean
   account: AccountState
   releases: Release[]
   selectedVersionId: string | null
@@ -35,6 +38,9 @@ export interface LauncherApi {
   refreshVersions(): Promise<void>
   saveSettings(patch: Partial<Settings>): Promise<Snapshot>
   selectVersion(id: string): Promise<Snapshot>
+  createOfflineAccount(name: string): Promise<Snapshot>
+  selectAccount(kind: AccountKind, id: string): Promise<Snapshot>
+  removeAccount(kind: AccountKind, id: string): Promise<Snapshot>
   signIn(): Promise<void>
   cancelSignIn(): Promise<void>
   signOut(): Promise<void>

@@ -15,7 +15,7 @@ it('constructs authenticated arguments with client ID and XUID and preserves spa
   const fixture = minecraftFixture()
   const platform = { name: 'windows' as const, arch: 'x64', version: '10.0.0' }
   const installed = await new InstallService(fixture.fetcher, platform).ensure(fixture.release, root, () => {})
-  const options = await makeLaunchOptions({ settings: { clientId: 'own-public-id', javaPath: 'C:\\Program Files\\Java\\bin\\java.exe', gameDirectory: root, maxMemoryMiB: 2048 }, version: installed, session: { clientId: 'own-public-id', xuid: '123456', accessToken: 'private-token', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } } }, platform)
+  const options = await makeLaunchOptions({ settings: { clientId: 'own-public-id', javaPath: 'C:\\Program Files\\Java\\bin\\java.exe', gameDirectory: root, maxMemoryMiB: 2048 }, version: installed, session: { kind: 'microsoft', clientId: 'own-public-id', xuid: '123456', accessToken: 'private-token', profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'OrbitPlayer' } } }, platform)
   const args = await generateArguments(options)
   expect(args[0]).toBe('C:\\Program Files\\Java\\bin\\java.exe')
   expect(args).toContain('own-public-id'); expect(args).toContain('123456')
@@ -23,7 +23,7 @@ it('constructs authenticated arguments with client ID and XUID and preserves spa
   expect(args).toContain('OrbitPlayer')
 })
 it('rejects missing credentials rather than using the core offline fallback', async () => {
-  await expect(makeLaunchOptions({ settings: { clientId: '', javaPath: '/java', gameDirectory: '/game', maxMemoryMiB: 2048 }, version: { id: 'x', root: '/game', javaMajor: 21 }, session: { accessToken: '', clientId: '', xuid: '', profile: { id: '', name: '' } } })).rejects.toThrow(/sign in|authenticated/i)
+  await expect(makeLaunchOptions({ settings: { clientId: '', javaPath: '/java', gameDirectory: '/game', maxMemoryMiB: 2048 }, version: { id: 'x', root: '/game', javaMajor: 21 }, session: { kind: 'microsoft', accessToken: '', clientId: '', xuid: '', profile: { kind: 'microsoft' as const, id: '', name: '' } } })).rejects.toThrow(/sign in|authenticated/i)
 })
 it('refuses unresolved placeholders and shell execution at the process boundary', () => {
   expect(() => guardSpawn('/java', ['${auth_xuid}'], { shell: false })).toThrow(/unresolved/i)
@@ -38,7 +38,7 @@ it('rechecks authorization after asynchronous core prechecks before spawning Jav
   let authorized = true
   const spawn = vi.fn(() => { throw new Error('Actual process must not spawn') })
   const pending = launchGame({ settings: { clientId: 'own-id', javaPath: '/java', gameDirectory: root, maxMemoryMiB: 2048 }, version,
-    session: { clientId: 'own-id', xuid: '12345', accessToken: 'secret', profile: { id: 'a'.repeat(32), name: 'OrbitPlayer' } },
+    session: { kind: 'microsoft', clientId: 'own-id', xuid: '12345', accessToken: 'secret', profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'OrbitPlayer' } },
     assertAuthorized: () => { if (!authorized) throw new Error('Account changed') }, onLog: () => {}, onExit: () => {}
   }, { spawn, launch: async options => { await new Promise<void>(resolve => { resume = resolve }); return options.spawn!('/java', ['Main'], { shell: false }) } })
   await vi.waitFor(() => expect(resume).toBeDefined())

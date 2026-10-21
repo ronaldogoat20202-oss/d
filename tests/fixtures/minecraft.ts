@@ -11,7 +11,7 @@ export function minecraftFixture() {
   const libraryUrl = 'https://libraries.minecraft.net/test/fixture/1/fixture-1.jar'
   const metadata = JSON.stringify({
     id: 'fixture', type: 'release', time: '2026-01-01T00:00:00Z', releaseTime: '2026-01-01T00:00:00Z',
-    mainClass: 'net.minecraft.client.main.Main', arguments: { game: ['--username', '${auth_player_name}', '--clientId', '${clientid}', '--xuid', '${auth_xuid}'], jvm: [] },
+    mainClass: 'net.minecraft.client.main.Main', arguments: { game: ['--username', '${auth_player_name}', '--uuid', '${auth_uuid}', '--accessToken', '${auth_access_token}', '--userType', '${user_type}', '--gameDir', '${game_directory}', '--clientId', '${clientid}', '--xuid', '${auth_xuid}'], jvm: [] },
     javaVersion: { majorVersion: 21, component: 'java-runtime-delta' },
     downloads: { client: { url: clientUrl, sha1: hash(jar), size: jar.length } },
     libraries: [

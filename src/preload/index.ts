@@ -3,6 +3,7 @@ import type { LauncherApi, Snapshot } from '../shared/contracts'
 
 const invoke = <T>(method: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(`orbit:${method}`, ...args)
 const api: LauncherApi = {
+  createOfflineAccount: name => invoke('createOfflineAccount', name), selectAccount: (kind,id) => invoke('selectAccount', kind,id), removeAccount: (kind,id) => invoke('removeAccount', kind,id),
   getSnapshot: () => invoke('getSnapshot'),
   refreshVersions: () => invoke('refreshVersions'),
   saveSettings: patch => invoke('saveSettings', patch),
