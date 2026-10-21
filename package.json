@@ -7,7 +7,9 @@
   "license": "MIT",
   "type": "module",
   "main": "out/main/index.cjs",
-  "engines": { "node": ">=24.15.0 <25" },
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron .",
@@ -18,9 +20,14 @@
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
+    "@xmcl/core": "2.16.2",
+    "lucide-react": "1.61.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "lucide-react": "1.61.0"
+    "undici": "7.29.0"
+  },
+  "overrides": {
+    "@xmcl/unzip": "2.1.2"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
