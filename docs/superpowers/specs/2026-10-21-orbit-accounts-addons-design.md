@@ -1,7 +1,7 @@
 # Orbit accounts and add-ons design
 
 Date: 2026-10-21
-Status: conversational design approved; written specification awaiting review
+Status: written specification approved; implementation plan in preparation
 Baseline: `ec616bf` on `work`
 
 ## Intent and agreed scope
@@ -127,4 +127,4 @@ Manual Windows acceptance still needs an actual user machine: create and restore
 
 Deliver the updated launcher source, reproducible dependency lockfile, automated checks, updated user/configuration instructions, and a downloadable Windows artifact. Update reusable cloud setup/start instructions only when needed, and validate any new commands before saving them as tested. Preserve package integrity and TLS checks.
 
-The user has approved the conversational design. This written specification must be reviewed before writing the implementation plan. The plan will map these requirements into implementation and verification tasks, after which implementation proceeds using the selected execution method. This document records a design; no feature implementation is claimed at this stage.
+The user has approved the conversational design and this written specification. The implementation plan maps these requirements into implementation and verification tasks and must be reviewed before implementation. Preserve the user's previously selected Native execution method. This document records a design; no feature implementation is claimed at this stage.
