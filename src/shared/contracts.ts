@@ -10,7 +10,7 @@ export interface DeviceInstructions { userCode: string; verificationUri: string;
 export type AccountState =
   | { status: 'signedOut' }
   | { status: 'signingIn'; device?: DeviceInstructions }
-  | { status: 'signedIn'; profile: AccountSummary }
+  | { status: 'signedIn'; profile: AccountSummary; persistent?: boolean }
 export interface DownloadProgress { completedBytes: number; totalBytes: number | null; message: string }
 export type Operation =
   | { phase: 'idle' }

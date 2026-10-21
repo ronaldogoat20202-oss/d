@@ -20,7 +20,9 @@
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
+    "@azure/msal-node": "7.1.0",
     "@xmcl/core": "2.16.2",
+    "@xmcl/user": "4.4.2",
     "lucide-react": "1.61.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
