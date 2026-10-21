@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowUpRight, Box, Compass, FileText, Settings2, Sparkles } from 'lucide-react'
 import type { Snapshot } from '../shared/contracts'
+import { SettingsView } from './components/SettingsView'
 
 export default function App() {
   const [page, setPage] = useState<'Play' | 'Settings' | 'Logs'>('Play')
@@ -35,7 +36,7 @@ export default function App() {
           </section>
           <section className="launch-card"><div><span className="field-label">GET READY TO EXPLORE</span><h3>{snapshot ? 'Choose your next adventure' : 'Your launchpad is waiting'}</h3><p>{!window.orbit ? 'Open the desktop app to connect to Minecraft.' : 'No versions loaded yet.'}</p></div><button className="primary" disabled><Compass size={18}/> Select a version</button></section>
           <div className="info-row"><span><Box size={17}/> Vanilla Minecraft. Your own space.</span><span>Built for the way you play <ArrowUpRight size={15}/></span></div>
-        </> : page === 'Settings' ? <section className="panel"><h2>Launcher preferences</h2><p>Connect the desktop launcher to configure Java, memory, and your game folder.</p></section> : <section className="panel log-panel"><div className="panel-heading"><h2>Launcher activity</h2><span className="pill">LIVE</span></div><p>No activity yet. Your next adventure starts with a launch.</p></section>}
+        </> : page === 'Settings' ? <SettingsView settings={snapshot?.settings || null} api={window.orbit}/> : <section className="panel log-panel"><div className="panel-heading"><h2>Launcher activity</h2><span className="pill">LIVE</span></div><p>No activity yet. Your next adventure starts with a launch.</p></section>}
         {error && <div role="alert" className="error-banner">{error}</div>}
       </div>
       <footer className="app-footer"><span><span className="status-dot"/> A LITTLE SPACE FOR BIG IDEAS</span><span>Independent launcher · Not affiliated with Mojang or Microsoft</span></footer>
