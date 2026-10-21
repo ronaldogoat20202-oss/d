@@ -1,20 +1,20 @@
 import { ArrowDownToLine, Check, Compass, RefreshCw } from 'lucide-react'
 import type { LauncherApi, Snapshot } from '../../shared/contracts'
+import { ProfilePicker } from './ProfilePicker'
 import { AccountPanel } from './AccountPanel'
 
 export function PlayView({ snapshot, api, onAction, onSettings }: { snapshot: Snapshot | null; api?: LauncherApi; onAction(action: () => Promise<unknown>): void; onSettings(): void }) {
-  const installed = !!snapshot?.selectedVersionId && snapshot.installedVersionIds.includes(snapshot.selectedVersionId)
+  const installed = snapshot?.profileInstallation === 'installed'
+  const profile = snapshot?.profiles.find(p=>p.id===snapshot.selectedProfileId)
   const operation = snapshot?.operation || { phase: 'idle' as const }
   const busy = operation.phase !== 'idle'
   const ready = snapshot?.account.status === 'signedIn'
   const perform = (action: keyof Pick<LauncherApi, 'install' | 'launch' | 'signIn' | 'signOut' | 'cancelSignIn' | 'refreshVersions'>) => { if (api) onAction(() => api[action]()) }
   return <>
+    {snapshot && <ProfilePicker profiles={snapshot.profiles} selectedId={snapshot.selectedProfileId} releases={snapshot.releases} busy={busy} onSelect={id=>{if(api)onAction(()=>api.selectProfile(id))}} onCreate={input=>{if(api)onAction(()=>api.createProfile(input))}} onRename={(id,name)=>{if(api)onAction(()=>api.renameProfile(id,name))}} onRemove={id=>{if(api)onAction(()=>api.removeProfile(id))}}/>}
     <section className="launch-card launch-controls">
-      <div className="version-control"><label className="field-label" htmlFor="minecraft-version">MINECRAFT VERSION</label><select id="minecraft-version" className="version-select" disabled={!api || busy || !snapshot?.releases.length} value={snapshot?.selectedVersionId || ''} onChange={e => { if (api) onAction(() => api.selectVersion(e.target.value)) }}>
-        {!snapshot?.releases.length && <option value="">No releases available</option>}
-        {snapshot?.releases.map(release => <option key={release.id} value={release.id}>{release.id} · Release</option>)}
-      </select><span className="version-caption">{installed ? <><Check size={12}/> Installed & verified</> : snapshot?.offline ? 'Offline · showing cached releases' : 'Official vanilla releases'}</span></div>
-      <div className="launch-action"><button className="primary play-button" disabled={!api || !snapshot?.selectedVersionId || busy || (installed && !ready)} onClick={() => perform(installed ? 'launch' : 'install')}>
+      <div className="version-control"><span className="field-label">SELECTED GAME</span><strong className="profile-game-version">{profile ? `Minecraft ${profile.minecraftVersion} · ${profile.loader.kind === 'fabric' ? 'Fabric' : 'Vanilla'}` : 'Choose or create a game profile'}</strong><span className="version-caption">{installed ? <><Check size={12}/> Installed &amp; verified</> : snapshot?.offline ? 'Offline · cached releases' : 'Verified official game files'}</span></div>
+      <div className="launch-action"><button className="primary play-button" disabled={!api || !profile || busy || (installed && !ready)} onClick={() => perform(installed ? 'launch' : 'install')}>
         {installed ? <Compass size={19}/> : <ArrowDownToLine size={18}/>}{busy ? operation.phase === 'running' ? 'Minecraft is running' : operation.phase === 'installing' ? 'Installing…' : 'Launching…' : installed ? 'Play Minecraft' : 'Install Minecraft'}
       </button><span>{installed && !ready ? <button className="text-button" onClick={onSettings}>Choose an account and select Java to play.</button> : 'A new adventure is one click away.'}</span></div>
     </section>

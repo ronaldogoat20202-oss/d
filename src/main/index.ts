@@ -9,6 +9,7 @@ import { Controller } from './controller'
 import { VersionService } from './services/versions'
 import { InstallService } from './services/installer'
 import { JavaService } from './services/java'
+import { ProfileStore } from './services/profiles'
 import { AccountStore } from './services/account-store'
 import { AccountService } from './services/accounts'
 import { CredentialStore } from './services/credentials'
@@ -28,6 +29,7 @@ async function openWindow(): Promise<void> {
     return result.canceled ? null : result.filePaths[0] || null
   }
   const controller = new Controller({
+    profiles: new ProfileStore(directory),
     configuredClientId: typeof __ORBIT_MICROSOFT_CLIENT_ID__ === 'string' ? __ORBIT_MICROSOFT_CLIENT_ID__ : '',
     settings: new SettingsStore(directory, runtime), versions: new VersionService(join(directory, 'cache')),
     installer: new InstallService(), java: new JavaService(), runtime, logs: new LogService(), launch: launchGame,

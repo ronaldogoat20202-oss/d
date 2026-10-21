@@ -7,7 +7,7 @@ const api: LauncherApi = {
   getSnapshot: () => invoke('getSnapshot'),
   refreshVersions: () => invoke('refreshVersions'),
   saveSettings: patch => invoke('saveSettings', patch),
-  selectVersion: id => invoke('selectVersion', id),
+  createProfile: input => invoke('createProfile', input), selectProfile: id => invoke('selectProfile', id), renameProfile: (id,name) => invoke('renameProfile', id,name), removeProfile: id => invoke('removeProfile', id),
   signIn: () => invoke('signIn'), cancelSignIn: () => invoke('cancelSignIn'), signOut: () => invoke('signOut'),
   chooseJava: () => invoke('chooseJava'), chooseGameDirectory: () => invoke('chooseGameDirectory'),
   install: () => invoke('install'), launch: () => invoke('launch'), copyLogs: () => invoke('copyLogs'),

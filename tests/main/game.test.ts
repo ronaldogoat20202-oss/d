@@ -30,6 +30,16 @@ it('refuses unresolved placeholders and shell execution at the process boundary'
   expect(() => guardSpawn('/java', ['Main'], { shell: true })).toThrow(/shell/i)
   expect(() => guardSpawn('/java path/java', ['argument with spaces'], { shell: false })).not.toThrow()
 })
+it('keeps the instance game directory separate from the shared resource root', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'orbit-shared-')); roots.push(root)
+  const fixture = minecraftFixture(), gameDirectory = join(root, 'instances', 'one')
+  const version = await new InstallService(fixture.fetcher).ensure(fixture.release, root, () => {})
+  const options = await makeLaunchOptions({ gameDirectory, settings: {clientId:'',javaPath:'/java',gameDirectory:root,maxMemoryMiB:2048}, version, session: {kind:'offline',profile:{kind:'offline',id:'b50ad385829d3141a2167e7d7539ba7f',name:'Notch'}} })
+  const args = await generateArguments(options)
+  expect(options.resourcePath).toBe(root)
+  expect(options.gamePath).toBe(gameDirectory)
+  expect(args[args.indexOf('--gameDir') + 1]).toBe(gameDirectory.replaceAll('\\','/'))
+})
 it('rechecks authorization after asynchronous core prechecks before spawning Java', async () => {
   const root = await mkdtemp(join(tmpdir(), 'orbit-spawn-')); roots.push(root)
   const fixture = minecraftFixture()

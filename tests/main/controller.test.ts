@@ -6,6 +6,7 @@ import { Controller, type ControllerDependencies } from '../../src/main/controll
 import { SettingsStore } from '../../src/main/services/settings'
 import { InstallService } from '../../src/main/services/installer'
 import { JavaService } from '../../src/main/services/java'
+import { ProfileStore } from '../../src/main/services/profiles'
 import { AccountStore } from '../../src/main/services/account-store'
 import { AccountService } from '../../src/main/services/accounts'
 import { LogService } from '../../src/main/services/logs'
@@ -21,7 +22,7 @@ async function setup() {
   const session = { kind: 'microsoft' as const, clientId: id, xuid: '12345', accessToken: 'private-token', profile: { kind: 'microsoft' as const, id: 'a'.repeat(32), name: 'OrbitPlayer' } }
   const installer = new InstallService(fixture.fetcher, { name: 'windows', arch: 'x64', version: '10.0.0' })
   const deps: ControllerDependencies = {
-    settings: new SettingsStore(root, runtime),
+    profiles: new ProfileStore(root), settings: new SettingsStore(root, runtime),
     versions: { list: async () => ({ releases: [fixture.release], latestReleaseId: 'fixture', cached: false }) },
     installer, runtime,
     java: new JavaService(async () => 'java.version = 21.0.1\nos.arch = amd64'),
@@ -39,7 +40,7 @@ it('installs without account/Java and blocks duplicate operations and busy confi
   const results = await Promise.allSettled([controller.install(), controller.install(), controller.saveSettings({ javaPath: '/new/java' })])
   expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected', 'rejected'])
   expect(ensure).toHaveBeenCalledTimes(1)
-  expect((await controller.snapshot()).installedVersionIds).toContain('fixture')
+  expect((await controller.snapshot()).profileInstallation).toBe('installed')
   await expect(controller.launch()).rejects.toThrow(/account|sign in|client ID/i)
 })
 it('requires Java and refreshes authentication before spawning; resets after game exits', async () => {
@@ -109,10 +110,10 @@ it('removes corrupt installed state and repairs the release with the Install act
   const root = (await controller.snapshot()).settings.gameDirectory
   await writeFile(join(root, 'versions/fixture/fixture.jar'), 'corrupt data')
   await expect(controller.launch()).rejects.toThrow(/repair|install/i)
-  expect((await controller.snapshot()).installedVersionIds).not.toContain('fixture')
+  expect((await controller.snapshot()).profileInstallation).toBe('missing')
   expect(deps.launch).not.toHaveBeenCalled()
   await controller.install()
-  expect((await controller.snapshot()).installedVersionIds).toContain('fixture')
+  expect((await controller.snapshot()).profileInstallation).toBe('installed')
 })
 it('does not spawn after the selected offline account changes', async () => {
   const { controller, deps } = await setup()

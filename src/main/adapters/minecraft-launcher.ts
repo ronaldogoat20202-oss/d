@@ -3,7 +3,7 @@ import type { SpawnOptions } from 'node:child_process'
 import type { Settings } from '../../shared/contracts'
 import type { GameSession, InstalledVersion } from '../services/types'
 
-export interface LaunchConfiguration { settings: Settings; version: InstalledVersion; session: GameSession }
+export interface LaunchConfiguration { gameDirectory?: string; settings: Settings; version: InstalledVersion; session: GameSession }
 export function guardSpawn(executable: string, args: readonly string[], options: SpawnOptions): void {
   if (options.shell) throw new Error('Shell execution is disabled for Minecraft.')
   if (!executable || executable.includes('\0') || args.some(arg => typeof arg !== 'string' || arg.includes('\0') || /\$\{[^}]+\}/.test(arg))) throw new Error('Unresolved or invalid Minecraft launch arguments.')
@@ -22,7 +22,7 @@ export async function makeLaunchOptions(input: LaunchConfiguration, platform: Pl
     resolved.arguments.game = strip(resolved.arguments.game)
   }
   return {
-    gamePath: settings.gameDirectory, resourcePath: version.root, version: resolved, javaPath: settings.javaPath,
+    gamePath: input.gameDirectory || settings.gameDirectory, resourcePath: version.root, version: resolved, javaPath: settings.javaPath,
     gameProfile: session.profile, accessToken: session.kind === 'microsoft' ? session.accessToken : '0', userType: session.kind === 'microsoft' ? undefined : 'legacy', minMemory: 512, maxMemory: settings.maxMemoryMiB,
     launcherName: 'Orbit', launcherBrand: 'Orbit', platform,
     features: { orbit_auth: { clientid: session.kind === 'microsoft' ? session.clientId : '', auth_xuid: session.kind === 'microsoft' ? session.xuid : '' } },

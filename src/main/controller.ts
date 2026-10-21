@@ -1,4 +1,7 @@
-import type { AccountKind, LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
+import type { AccountKind, NewProfile, LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
+import { mkdir } from 'node:fs/promises'
+import { safeDestination } from './services/downloads'
+import type { ProfileStore } from './services/profiles'
 import type { SettingsStore } from './services/settings'
 import type { VersionService } from './services/versions'
 import type { InstallService } from './services/installer'
@@ -10,6 +13,7 @@ import { resolveClientId } from './services/auth-config'
 import type { RuntimePort } from './services/types'
 
 export interface ControllerDependencies {
+  profiles: Pick<ProfileStore, 'list' | 'selected' | 'migrateLegacy' | 'create' | 'select' | 'rename' | 'remove'>
   configuredClientId?: string
   settings: Pick<SettingsStore, 'read' | 'update'>
   versions: Pick<VersionService, 'list'>
@@ -35,7 +39,7 @@ export class Controller {
   async initialize(): Promise<void> {
     const stored = await this.deps.settings.read()
     const settings = { ...stored, clientId: resolveClientId(this.deps.configuredClientId || '', stored.clientId) || '' }
-    this.state = { settings, accounts: (await this.deps.accounts.index()).accounts, microsoftConfigured: !!settings.clientId, account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
+    this.state = { settings, accounts: (await this.deps.accounts.index()).accounts, microsoftConfigured: !!settings.clientId, account: { status: 'signedOut' }, releases: [], profiles: await this.deps.profiles.list(), selectedProfileId: (await this.deps.profiles.selected())?.id || null, profileInstallation: 'unknown', operation: { phase: 'idle' }, logs: [], error: null, offline: false }
   }
   async snapshot(): Promise<Snapshot> { return structuredClone({ ...this.state, logs: this.deps.logs.entries() }) }
   subscribe(listener: (state: Snapshot) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -56,22 +60,46 @@ export class Controller {
     try {
       const list = await this.deps.versions.list()
       this.state.releases = list.releases; this.state.offline = list.cached; this.state.error = null
-      if (this.state.operation.phase === 'idle' && !this.editing) await this.selectVersion(this.state.selectedVersionId && list.releases.some(r => r.id === this.state.selectedVersionId) ? this.state.selectedVersionId : list.latestReleaseId)
+      if (this.state.operation.phase === 'idle' && !this.editing) {
+        await this.deps.profiles.migrateLegacy(this.state.settings.gameDirectory, list.latestReleaseId)
+        this.state.profiles = await this.deps.profiles.list()
+        const selected = await this.deps.profiles.selected()
+        if (selected) await this.selectProfile(selected.id)
+      }
       this.deps.logs.append('info', list.cached ? 'Using cached releases while offline.' : 'Official Minecraft release list updated.')
     } catch (e) { this.state.offline = true; throw this.failure(e, 'VERSIONS_UNAVAILABLE') }
     finally { this.refreshing = false; this.emit() }
   }
-  async selectVersion(id: string): Promise<Snapshot> {
-    this.idle()
-    const release = this.state.releases.find(r => r.id === id)
-    if (!release) throw new Error('Select an available official Minecraft release.')
-    this.editing = true
+  private profile() { const p = this.state.profiles.find(p => p.id === this.state.selectedProfileId); if (!p) throw new Error('Choose a game profile first.'); return p }
+  async selectProfile(id: string): Promise<Snapshot> {
+    this.idle(); this.editing = true
     try {
-      const installed = await this.deps.installer.inspect(release, this.state.settings.gameDirectory)
-      this.state.selectedVersionId = id
-      this.state.installedVersionIds = this.state.installedVersionIds.filter(value => value !== id)
-      if (installed) this.state.installedVersionIds.push(id)
+      const p = await this.deps.profiles.select(id)
+      this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'unknown'
+      const release = this.state.releases.find(r => r.id === p.minecraftVersion)
+      if (release) this.state.profileInstallation = await this.deps.installer.inspect(release,p.libraryRoot) ? 'installed' : 'missing'
       this.state.error = null; this.emit(); return this.snapshot()
+    } finally { this.editing = false }
+  }
+  async createProfile(input: NewProfile): Promise<Snapshot> {
+    this.idle(); this.editing = true
+    try {
+      if (!input || !this.state.releases.some(r => r.id === input.minecraftVersion)) throw new Error('Choose an available official Minecraft release.')
+      if (input.loader !== 'vanilla') throw new Error('Fabric profile creation is not available yet.')
+      const p = await this.deps.profiles.create(input, this.state.settings.gameDirectory, {kind:'vanilla'})
+      this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'missing'; this.state.error = null
+      this.emit(); return this.snapshot()
+    } finally { this.editing = false }
+  }
+  async renameProfile(id: string, name: string): Promise<Snapshot> {
+    this.idle(); this.editing = true
+    try { await this.deps.profiles.rename(id,name); this.state.profiles = await this.deps.profiles.list(); this.emit(); return this.snapshot() } finally { this.editing = false }
+  }
+  async removeProfile(id: string): Promise<Snapshot> {
+    this.idle(); this.editing = true
+    try {
+      await this.deps.profiles.remove(id); this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = (await this.deps.profiles.selected())?.id || null
+      this.state.profileInstallation = 'unknown'; this.deps.logs.append('info','Profile removed from Orbit. Its worlds and files have been retained.'); this.emit(); return this.snapshot()
     } finally { this.editing = false }
   }
   async saveSettings(patch: Partial<Settings>): Promise<Snapshot> {
@@ -81,7 +109,6 @@ export class Controller {
       const saved = await this.deps.settings.update(patch)
       const settings = { ...saved, clientId: resolveClientId(this.deps.configuredClientId || '', saved.clientId) || '' }
       if (settings.clientId !== previous.clientId) { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
-      if (settings.gameDirectory !== previous.gameDirectory) this.state.installedVersionIds = []
       this.state.settings = settings; this.state.microsoftConfigured = !!settings.clientId; this.state.error = null; this.emit(); return this.snapshot()
     } catch (e) { throw this.failure(e, 'SETTINGS_INVALID') } finally { this.editing = false }
   }
@@ -128,33 +155,34 @@ export class Controller {
     if (!this.deps.accounts.current()) this.state.account = { status: 'signedOut' }
     this.state.accounts = (await this.deps.accounts.index()).accounts; this.emit(); return this.snapshot()
   }
-  private release() { const release = this.state.releases.find(r => r.id === this.state.selectedVersionId); if (!release) throw new Error('Choose an official Minecraft release first.'); return release }
+  private release() { const release = this.state.releases.find(r => r.id === this.profile().minecraftVersion); if (!release) throw new Error('Choose an official Minecraft release first.'); return release }
   async install(): Promise<void> {
-    this.idle(); const release = this.release()
+    this.idle(); const profile = this.profile(), release = this.release()
     this.state.operation = { phase: 'installing', versionId: release.id, progress: { completedBytes: 0, totalBytes: null, message: 'Preparing download' } }; this.state.error = null; this.emit()
     this.deps.logs.append('info', `Installing Minecraft ${release.id}.`)
     let lastUpdate = 0
     try {
-      await this.deps.installer.ensure(release, this.state.settings.gameDirectory, progress => {
+      await this.deps.installer.ensure(release, profile.libraryRoot, progress => {
         this.state.operation = { phase: 'installing', versionId: release.id, progress }
         if (Date.now() - lastUpdate > 100 || progress.completedBytes === progress.totalBytes) { lastUpdate = Date.now(); this.emit() }
       })
-      if (!this.state.installedVersionIds.includes(release.id)) this.state.installedVersionIds.push(release.id)
+      this.state.profileInstallation = 'installed'
       this.deps.logs.append('info', `Minecraft ${release.id} installation verified.`)
-    } catch (e) { this.state.installedVersionIds = this.state.installedVersionIds.filter(id => id !== release.id); throw this.failure(e, 'INSTALL_FAILED') }
+    } catch (e) { this.state.profileInstallation = 'missing'; throw this.failure(e, 'INSTALL_FAILED') }
     finally { this.state.operation = { phase: 'idle' }; this.emit() }
   }
   async launch(): Promise<void> {
-    this.idle(); const release = this.release()
+    this.idle(); const profile = this.profile(), release = this.release()
     const revision = this.accountRevision
     this.state.operation = { phase: 'launching', versionId: release.id }; this.state.error = null; this.emit()
     let exited = false
     try {
-      const version = await this.deps.installer.inspect(release, this.state.settings.gameDirectory)
-      if (!version) { this.state.installedVersionIds = this.state.installedVersionIds.filter(id => id !== release.id); throw new Error('Install or repair this Minecraft release before launching.') }
+      const version = await this.deps.installer.inspect(release, profile.libraryRoot)
+      if (!version) { this.state.profileInstallation = 'missing'; throw new Error('Install or repair this Minecraft release before launching.') }
+      await mkdir(profile.libraryRoot, {recursive:true}); await safeDestination(profile.libraryRoot, profile.gameDirectory + '/.orbit-check'); await mkdir(profile.gameDirectory, {recursive:true})
       const session = await this.deps.accounts.session(this.state.settings.clientId)
       const assertAuthorized = () => {
-        if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id || (session.kind === 'microsoft' && this.state.settings.clientId !== session.clientId))
+        if (revision !== this.accountRevision || this.state.selectedProfileId !== profile.id || this.deps.accounts.current()?.id !== session.profile.id || (session.kind === 'microsoft' && this.state.settings.clientId !== session.clientId))
           throw new Error('Your account changed while preparing Minecraft. Sign in and try again.')
       }
       assertAuthorized()
@@ -169,7 +197,7 @@ export class Controller {
       if (this.deps.runtime.architecture !== 'x64' || this.state.settings.maxMemoryMiB < 1024 || this.state.settings.maxMemoryMiB > cap) throw new Error('Check x64 Java and memory allocation in Settings before launching.')
       if (session.kind === 'microsoft') this.deps.logs.registerSecret(session.accessToken)
       assertAuthorized()
-      await this.deps.launch({ settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
+      await this.deps.launch({ gameDirectory: profile.gameDirectory, settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
         onLog: text => { this.deps.logs.append('info', text); this.emit() },
         onExit: code => { if (exited) return; exited = true; this.state.operation = { phase: 'idle' }; this.deps.logs.append(code === 0 ? 'info' : 'error', `Minecraft exited with ${code === null ? 'an interruption' : `code ${code}`}.`); if (code !== 0) this.state.error = { code: 'GAME_EXIT', message: `Minecraft stopped with exit code ${code ?? 'unknown'}. Check Logs and Java settings.` }; this.emit() }
       })
@@ -178,6 +206,6 @@ export class Controller {
   }
   async copyLogs(): Promise<void> { this.deps.writeClipboard?.(this.deps.logs.entries().map(line => `${new Date(line.time).toISOString()} [${line.level}] ${line.message}`).join('\n')) }
   api(): Omit<LauncherApi, 'subscribe'> {
-    return { createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), selectVersion: id => this.selectVersion(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+    return { createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
   }
 }

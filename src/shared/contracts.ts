@@ -1,3 +1,5 @@
+import type { GameProfile, NewProfile } from './profiles'
+export type { GameProfile, Loader, NewProfile } from './profiles'
 import type { AccountIdentity, AccountKind } from './accounts'
 export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
@@ -26,8 +28,9 @@ export interface Snapshot {
   microsoftConfigured: boolean
   account: AccountState
   releases: Release[]
-  selectedVersionId: string | null
-  installedVersionIds: string[]
+  profiles: GameProfile[]
+  selectedProfileId: string | null
+  profileInstallation: 'unknown' | 'missing' | 'installed'
   operation: Operation
   logs: LogEntry[]
   error: PublicError | null
@@ -37,7 +40,10 @@ export interface LauncherApi {
   getSnapshot(): Promise<Snapshot>
   refreshVersions(): Promise<void>
   saveSettings(patch: Partial<Settings>): Promise<Snapshot>
-  selectVersion(id: string): Promise<Snapshot>
+  createProfile(input: NewProfile): Promise<Snapshot>
+  selectProfile(id: string): Promise<Snapshot>
+  renameProfile(id: string, name: string): Promise<Snapshot>
+  removeProfile(id: string): Promise<Snapshot>
   createOfflineAccount(name: string): Promise<Snapshot>
   selectAccount(kind: AccountKind, id: string): Promise<Snapshot>
   removeAccount(kind: AccountKind, id: string): Promise<Snapshot>

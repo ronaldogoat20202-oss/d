@@ -12,3 +12,12 @@
 .account-options label { display: grid; gap: 7px; font-size: 12px; flex: 1; min-width: 190px; }
 .account-options input, .account-options select { background: #101812; border: 1px solid #34483b; color: #edf6f0; border-radius: 8px; padding: 10px; width: 100%; }
 .account-options small { color: #a3b5a9; width: 100%; }
+
+.profile-panel { margin-bottom: 16px; padding: 18px 20px; }
+.profile-line, .profile-form { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+.profile-line label { flex:1; min-width:180px; }
+.profile-panel label { display:grid; gap:8px; font-size:12px; }
+.profile-panel input, .profile-panel select { background:#111b15; color:#edf6f0; border:1px solid #34483b; border-radius:8px; padding:10px; max-width:100%; }
+.profile-form { border-top:1px solid #2a3830; padding-top:16px; margin-top:14px; }
+.retained-path { width:100%; color:#a3b5a9; overflow-wrap:anywhere; }
+.profile-game-version {display:block;margin:12px 0;color:#e0ede4;}
