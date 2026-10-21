@@ -16,11 +16,11 @@ export class MinecraftInstallerAdapter {
   async version(release: Release, root: string, platform: Platform): Promise<ResolvedVersion> {
     return Version.parse(root, release.id, platform)
   }
-  dependencies(version: ResolvedVersion, root: string): InstallFile[] {
+  dependencies(version: ResolvedVersion, root: string, fabric = false): InstallFile[] {
     const folder = new MinecraftFolder(root)
     if (!version.downloads.client) throw new Error('Official metadata has no Minecraft client download.')
-    const result = [artifact(folder.getVersionJar(version.id), version.downloads.client)]
-    for (const library of version.libraries) result.push(artifact(folder.getLibraryByPath(library.download.path || library.path), library.download))
+    const result = [artifact(folder.getVersionJar(version.minecraftVersion), version.downloads.client)]
+    for (const library of version.libraries) result.push(artifact(folder.getLibraryByPath(library.download.path || library.path), { ...library.download, size: fabric && library.download.size === -1 ? undefined : library.download.size }))
     if (version.assetIndex) result.push(artifact(folder.getAssetsIndex(version.assetIndex.id), version.assetIndex))
     if (version.logging?.client?.file) result.push(artifact(folder.getLogConfig(version.logging.client.file.id), version.logging.client.file))
     return result

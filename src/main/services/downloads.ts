@@ -3,7 +3,7 @@ import { lstat, mkdir, open, realpath, rename, rm, stat } from 'node:fs/promises
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { InstallFile } from './artifacts'
-import { assertOfficialUrl, type FetchPort } from './network'
+import { assertOfficialUrl, type FetchPort, type UrlPolicy } from './network'
 
 export async function safeDestination(root: string, destination: string): Promise<void> {
   const base = resolve(root), path = resolve(destination)
@@ -29,9 +29,9 @@ export async function validFile(file: InstallFile): Promise<boolean> {
     return true
   } catch { return false }
 }
-export async function downloadFile(file: InstallFile, root: string, fetcher: FetchPort, onBytes: (count: number) => void): Promise<void> {
+export async function downloadFile(file: InstallFile, root: string, fetcher: FetchPort, onBytes: (count: number) => void, policy: UrlPolicy = assertOfficialUrl): Promise<void> {
   await safeDestination(root, file.path)
-  const urls = file.urls.filter(url => { try { assertOfficialUrl(url); return true } catch { return false } })
+  const urls = file.urls.filter(url => { try { policy(url); return true } catch { return false } })
   if (!urls.length) throw new Error('Artifact has no allowed official download URL.')
   const response = await fetcher(urls[0], { signal: AbortSignal.timeout(120000) })
   if (!response.ok || !response.body) throw new Error('Minecraft download failed. Check your connection and retry.')

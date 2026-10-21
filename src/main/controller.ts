@@ -1,10 +1,11 @@
-import type { AccountKind, NewProfile, LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
+import type { AccountKind, GameProfile, Loader, NewProfile, LauncherApi, PublicError, Settings, Snapshot } from '../shared/contracts'
 import { mkdir } from 'node:fs/promises'
 import { safeDestination } from './services/downloads'
 import type { ProfileStore } from './services/profiles'
 import type { SettingsStore } from './services/settings'
 import type { VersionService } from './services/versions'
 import type { InstallService } from './services/installer'
+import type { FabricService } from './services/fabric'
 import type { AccountService } from './services/accounts'
 import type { JavaService } from './services/java'
 import type { LogService } from './services/logs'
@@ -18,6 +19,7 @@ export interface ControllerDependencies {
   settings: Pick<SettingsStore, 'read' | 'update'>
   versions: Pick<VersionService, 'list'>
   installer: Pick<InstallService, 'ensure' | 'inspect'>
+  fabric?: Pick<FabricService, 'listLoaders' | 'ensure' | 'inspect'>
   accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent' | 'index' | 'createOffline' | 'select' | 'remove' | 'cancelSignIn'>
   java: Pick<JavaService, 'verify' | 'detect'>
   logs: LogService
@@ -71,13 +73,19 @@ export class Controller {
     finally { this.refreshing = false; this.emit() }
   }
   private profile() { const p = this.state.profiles.find(p => p.id === this.state.selectedProfileId); if (!p) throw new Error('Choose a game profile first.'); return p }
+  private installer(profile: GameProfile): Pick<InstallService, 'ensure'|'inspect'> {
+    if (profile.loader.kind === 'vanilla') return this.deps.installer
+    const fabric = this.deps.fabric, loader = profile.loader.version
+    if (!fabric) throw new Error('Fabric support is unavailable in this build.')
+    return {ensure:(base,root,progress)=>fabric.ensure(base,loader,root,progress),inspect:(base,root)=>fabric.inspect(base,loader,root)}
+  }
   async selectProfile(id: string): Promise<Snapshot> {
     this.idle(); this.editing = true
     try {
       const p = await this.deps.profiles.select(id)
       this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'unknown'
       const release = this.state.releases.find(r => r.id === p.minecraftVersion)
-      if (release) this.state.profileInstallation = await this.deps.installer.inspect(release,p.libraryRoot) ? 'installed' : 'missing'
+      if (release) this.state.profileInstallation = await this.installer(p).inspect(release,p.libraryRoot) ? 'installed' : 'missing'
       this.state.error = null; this.emit(); return this.snapshot()
     } finally { this.editing = false }
   }
@@ -85,8 +93,13 @@ export class Controller {
     this.idle(); this.editing = true
     try {
       if (!input || !this.state.releases.some(r => r.id === input.minecraftVersion)) throw new Error('Choose an available official Minecraft release.')
-      if (input.loader !== 'vanilla') throw new Error('Fabric profile creation is not available yet.')
-      const p = await this.deps.profiles.create(input, this.state.settings.gameDirectory, {kind:'vanilla'})
+      let loader: Loader = {kind:'vanilla'}
+      if (input.loader === 'fabric') {
+        const stable = (await this.deps.fabric?.listLoaders(input.minecraftVersion))?.find(l=>l.stable)
+        if (!stable) throw new Error('No stable Fabric loader is available for this Minecraft version.')
+        loader = {kind:'fabric',version:stable.version}
+      } else if (input.loader !== 'vanilla') throw new Error('Choose Vanilla or Fabric.')
+      const p = await this.deps.profiles.create(input, this.state.settings.gameDirectory, loader)
       this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'missing'; this.state.error = null
       this.emit(); return this.snapshot()
     } finally { this.editing = false }
@@ -162,7 +175,7 @@ export class Controller {
     this.deps.logs.append('info', `Installing Minecraft ${release.id}.`)
     let lastUpdate = 0
     try {
-      await this.deps.installer.ensure(release, profile.libraryRoot, progress => {
+      await this.installer(profile).ensure(release, profile.libraryRoot, progress => {
         this.state.operation = { phase: 'installing', versionId: release.id, progress }
         if (Date.now() - lastUpdate > 100 || progress.completedBytes === progress.totalBytes) { lastUpdate = Date.now(); this.emit() }
       })
@@ -177,7 +190,7 @@ export class Controller {
     this.state.operation = { phase: 'launching', versionId: release.id }; this.state.error = null; this.emit()
     let exited = false
     try {
-      const version = await this.deps.installer.inspect(release, profile.libraryRoot)
+      const version = await this.installer(profile).inspect(release, profile.libraryRoot)
       if (!version) { this.state.profileInstallation = 'missing'; throw new Error('Install or repair this Minecraft release before launching.') }
       await mkdir(profile.libraryRoot, {recursive:true}); await safeDestination(profile.libraryRoot, profile.gameDirectory + '/.orbit-check'); await mkdir(profile.gameDirectory, {recursive:true})
       const session = await this.deps.accounts.session(this.state.settings.clientId)

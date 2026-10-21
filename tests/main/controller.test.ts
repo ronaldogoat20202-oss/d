@@ -11,6 +11,8 @@ import { AccountStore } from '../../src/main/services/account-store'
 import { AccountService } from '../../src/main/services/accounts'
 import { LogService } from '../../src/main/services/logs'
 import { minecraftFixture } from '../fixtures/minecraft'
+import { fabricFixture } from '../fixtures/fabric'
+import { FabricService } from '../../src/main/services/fabric'
 import type { JavaRuntime } from '../../src/main/services/types'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))) })
@@ -42,6 +44,18 @@ it('installs without account/Java and blocks duplicate operations and busy confi
   expect(ensure).toHaveBeenCalledTimes(1)
   expect((await controller.snapshot()).profileInstallation).toBe('installed')
   await expect(controller.launch()).rejects.toThrow(/account|sign in|client ID/i)
+})
+it('pins a stable Fabric loader and dispatches installation and launch to its child version',async()=>{
+  const {controller,deps}=await setup(), f=fabricFixture()
+  deps.fabric=new FabricService(f.fetcher,{name:'windows',arch:'x64',version:'10.0.0'})
+  await controller.createProfile({name:'Fabric world',minecraftVersion:f.release.id,loader:'fabric'})
+  const state=await controller.snapshot(), p=state.profiles.find(p=>p.id===state.selectedProfileId)!
+  expect(p.loader).toEqual({kind:'fabric',version:f.loaderVersion})
+  await controller.install();await controller.selectProfile(p.id)
+  expect((await controller.snapshot()).profileInstallation).toBe('installed')
+  await controller.createOfflineAccount('Builder');await controller.saveSettings({javaPath:'/java21'})
+  await controller.launch()
+  expect(vi.mocked(deps.launch).mock.calls[0][0].version.id).toBe(f.profile.id)
 })
 it('requires Java and refreshes authentication before spawning; resets after game exits', async () => {
   const { controller, deps, id } = await setup()

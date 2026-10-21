@@ -8,6 +8,7 @@ import { SettingsStore } from './services/settings'
 import { Controller } from './controller'
 import { VersionService } from './services/versions'
 import { InstallService } from './services/installer'
+import { FabricService } from './services/fabric'
 import { JavaService } from './services/java'
 import { ProfileStore } from './services/profiles'
 import { AccountStore } from './services/account-store'
@@ -32,7 +33,7 @@ async function openWindow(): Promise<void> {
     profiles: new ProfileStore(directory),
     configuredClientId: typeof __ORBIT_MICROSOFT_CLIENT_ID__ === 'string' ? __ORBIT_MICROSOFT_CLIENT_ID__ : '',
     settings: new SettingsStore(directory, runtime), versions: new VersionService(join(directory, 'cache')),
-    installer: new InstallService(), java: new JavaService(), runtime, logs: new LogService(), launch: launchGame,
+    installer: new InstallService(), fabric: new FabricService(), java: new JavaService(), runtime, logs: new LogService(), launch: launchGame,
     accounts: new AccountService(new MinecraftAuthAdapter(), new CredentialStore(directory, safeStorage), new AccountStore(directory)),
     pickJava: () => pick(['openFile'], 'Choose the Java executable (java.exe)'),
     pickGameDirectory: () => pick(['openDirectory', 'createDirectory'], 'Choose Minecraft game folder'),
