@@ -1,9 +1,9 @@
-import type { AccountSummary, DeviceInstructions } from '../../shared/contracts'
+import type { AccountSummary } from '../../shared/contracts'
 import type { GameSession } from './types'
 import { validClientId } from './settings'
 
 export interface AuthPort {
-  authenticate(clientId: string, onCode: (code: DeviceInstructions) => void, signal: AbortSignal): Promise<GameSession>
+  authenticate(clientId: string, openBrowser: (url: string) => Promise<void>, signal: AbortSignal): Promise<GameSession>
   refresh(clientId: string, signal: AbortSignal): Promise<GameSession>
   serialize(): string
   deserialize(clientId: string, cache: string): void
@@ -28,13 +28,13 @@ export class AccountService {
     this.guard(generation, signal)
     this.profile = { ...session.profile }
   }
-  async signIn(id: string, onCode: (code: DeviceInstructions) => void, signal: AbortSignal): Promise<AccountSummary> {
+  async signIn(id: string, openBrowser: (url: string) => Promise<void>, signal: AbortSignal): Promise<AccountSummary> {
     this.validateId(id)
     const generation = ++this.generation
     this.guard(generation, signal)
     this.profile = null; this.persistent = false; this.clientId = id; this.auth.clear()
     try {
-      const session = await this.auth.authenticate(id, code => { this.guard(generation, signal); onCode(code) }, signal)
+      const session = await this.auth.authenticate(id, async url => { this.guard(generation, signal); await openBrowser(url) }, signal)
       await this.accept(session, id, generation, signal)
       return { ...session.profile }
     } catch (error) { if (generation === this.generation) this.profile = null; throw error }

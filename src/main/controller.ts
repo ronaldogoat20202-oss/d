@@ -6,9 +6,11 @@ import type { AccountService } from './services/accounts'
 import type { JavaService } from './services/java'
 import type { LogService } from './services/logs'
 import type { launchGame } from './services/game'
+import { resolveClientId } from './services/auth-config'
 import type { RuntimePort } from './services/types'
 
 export interface ControllerDependencies {
+  configuredClientId?: string
   settings: Pick<SettingsStore, 'read' | 'update'>
   versions: Pick<VersionService, 'list'>
   installer: Pick<InstallService, 'ensure' | 'inspect'>
@@ -31,7 +33,9 @@ export class Controller {
   private accountRevision = 0
   constructor(private deps: ControllerDependencies) {}
   async initialize(): Promise<void> {
-    this.state = { settings: await this.deps.settings.read(), account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
+    const stored = await this.deps.settings.read()
+    const settings = { ...stored, clientId: resolveClientId(this.deps.configuredClientId || '', stored.clientId) || '' }
+    this.state = { settings, account: { status: 'signedOut' }, releases: [], selectedVersionId: null, installedVersionIds: [], operation: { phase: 'idle' }, logs: [], error: null, offline: false }
   }
   async snapshot(): Promise<Snapshot> { return structuredClone({ ...this.state, logs: this.deps.logs.entries() }) }
   subscribe(listener: (state: Snapshot) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -74,7 +78,8 @@ export class Controller {
     this.idle(); this.editing = true
     try {
       const previous = this.state.settings
-      const settings = await this.deps.settings.update(patch)
+      const saved = await this.deps.settings.update(patch)
+      const settings = { ...saved, clientId: resolveClientId(this.deps.configuredClientId || '', saved.clientId) || '' }
       if (settings.clientId !== previous.clientId) { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
       if (settings.gameDirectory !== previous.gameDirectory) this.state.installedVersionIds = []
       this.state.settings = settings; this.state.error = null; this.emit(); return this.snapshot()
@@ -88,9 +93,9 @@ export class Controller {
     const request = new AbortController(); this.authRequest = request
     this.state.account = { status: 'signingIn' }; this.state.error = null; this.emit()
     try {
-      const profile = await this.deps.accounts.signIn(this.state.settings.clientId, device => {
-        this.state.account = { status: 'signingIn', device }; this.emit()
-        void this.deps.openVerification?.(device.verificationUri).catch(() => { this.state.error = { code: 'BROWSER_UNAVAILABLE', message: 'Open the Microsoft verification address shown above in your browser.' }; this.emit() })
+      const profile = await this.deps.accounts.signIn(this.state.settings.clientId, async url => {
+        if (!this.deps.openVerification) throw new Error('System browser is unavailable.')
+        await this.deps.openVerification(url)
       }, request.signal)
       if (!request.signal.aborted) { this.state.account = { status: 'signedIn', profile, persistent: this.deps.accounts.isPersistent() }; this.deps.logs.append('info', 'Minecraft account connected.') }
     } catch (e) {

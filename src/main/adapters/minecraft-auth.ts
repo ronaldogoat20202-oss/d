@@ -1,6 +1,7 @@
-import { PublicClientApplication, type DeviceCodeRequest, type INetworkModule, type NetworkRequestOptions, type NetworkResponse } from '@azure/msal-node'
+import { PublicClientApplication, CryptoProvider, type INetworkModule, type NetworkRequestOptions, type NetworkResponse } from '@azure/msal-node'
 import { MicrosoftAuthenticator, MojangClient } from '@xmcl/user'
-import type { DeviceInstructions } from '../../shared/contracts'
+import { randomBytes } from 'node:crypto'
+import { openOAuthCallback } from '../services/oauth-callback'
 import type { AuthPort } from '../services/accounts'
 import type { GameSession } from '../services/types'
 import { networkFetch, type FetchPort } from '../services/network'
@@ -30,24 +31,24 @@ export class MinecraftAuthAdapter implements AuthPort {
   serialize(): string { return this.client?.getTokenCache().serialize() || '{}' }
   deserialize(id: string, cache: string): void { this.application(id).getTokenCache().deserialize(cache) }
   clear(): void { this.client = null; this.id = '' }
-  async authenticate(id: string, onCode: (code: DeviceInstructions) => void, signal: AbortSignal): Promise<GameSession> {
+  async authenticate(id: string, openBrowser: (url: string) => Promise<void>, signal: AbortSignal): Promise<GameSession> {
     const application = this.application(id)
-    const request: DeviceCodeRequest = {
-      scopes, timeout: 900,
-      deviceCodeCallback: code => onCode({ userCode: code.userCode, verificationUri: code.verificationUri, expiresAt: Date.now() + code.expiresIn * 1000 })
-    }
-    const abort = () => { request.cancel = true }
-    signal.addEventListener('abort', abort, { once: true })
-    if (signal.aborted) abort()
+    const state = randomBytes(32).toString('hex')
+    const callback = await openOAuthCallback({ state, signal })
     try {
-      const token = await application.acquireTokenByDeviceCode(request)
-      if (!token?.accessToken || signal.aborted) throw new Error('Device sign-in was cancelled or expired.')
+      const pkce = await new CryptoProvider().generatePkceCodes()
+      const url = await application.getAuthCodeUrl({ scopes, redirectUri: callback.redirectUri, state, codeChallenge: pkce.challenge, codeChallengeMethod: 'S256', prompt: 'select_account' })
+      if (signal.aborted) throw new Error('Sign-in cancelled.')
+      await openBrowser(url)
+      const code = await callback.code
+      const token = await application.acquireTokenByCode({ code, scopes, redirectUri: callback.redirectUri, codeVerifier: pkce.verifier })
+      if (!token?.accessToken || signal.aborted) throw new Error('Sign-in cancelled.')
       return await this.exchange(token.accessToken, id, signal)
     } catch (error) {
-      if (signal.aborted) throw new Error('Device sign-in was cancelled or expired.')
+      if (signal.aborted) throw new Error('Microsoft sign-in was cancelled.')
       if (error instanceof AuthenticationFailure) throw error
-      throw new Error('Microsoft sign-in failed. Check the application client ID, public-client configuration, account access, and network connection, then try again.')
-    } finally { signal.removeEventListener('abort', abort) }
+      throw new Error('Microsoft browser sign-in failed or expired. Check Orbit application registration and your connection, then try again.')
+    } finally { await callback.close() }
   }
   async refresh(id: string, signal: AbortSignal): Promise<GameSession> {
     const application = this.application(id)

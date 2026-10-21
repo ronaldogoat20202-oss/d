@@ -11,7 +11,7 @@ export function allowedExternalUrl(value: string): boolean {
   try {
     const url = new URL(value)
     return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
-      ['www.microsoft.com', 'microsoft.com'].includes(url.hostname) &&
-      ['/link', '/devicelogin'].includes(url.pathname.replace(/\/$/, ''))
+      ((['www.microsoft.com', 'microsoft.com'].includes(url.hostname) && ['/link', '/devicelogin'].includes(url.pathname.replace(/\/$/, ''))) ||
+      (url.hostname === 'login.microsoftonline.com' && url.pathname === '/consumers/oauth2/v2.0/authorize'))
   } catch { return false }
 }
