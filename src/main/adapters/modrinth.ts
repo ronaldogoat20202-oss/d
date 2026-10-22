@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir,readFile,readdir,rename,rm,stat,writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AddonKind,AddonTarget,CatalogDependency,CatalogFile,CatalogProject,CatalogQuery,CatalogVersion,SearchPage } from '../../shared/addons'
+import type { AddonKind,AddonTarget,CatalogKind,CatalogDependency,CatalogFile,CatalogProject,CatalogProjectDetails,CatalogQuery,CatalogVersion,SearchPage } from '../../shared/addons'
+import { projectImage } from '../../shared/project-links'
 import { assertModrinthUrl,assertVersionId,boundedText,networkFetch,type FetchPort } from '../services/network'
 const kinds:AddonKind[]=['mod','resourcepack','datapack','shader']
 const id=(v:unknown):string=>{if(typeof v!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(v))throw new Error('Invalid Modrinth identifier.');return v}
@@ -9,7 +10,13 @@ const plain=(v:unknown,max=4096):string=>{if(typeof v!=='string'||v.length>max||
 export const loaderTag=(kind:AddonKind)=>({mod:'fabric',resourcepack:'minecraft',datapack:'datapack',shader:'iris'})[kind]
 export function compatible(v:CatalogVersion,t:AddonTarget):boolean { return v.kind===t.kind && v.gameVersions.includes(t.gameVersion) && v.loaders.includes(loaderTag(t.kind)) && (t.kind!=='mod'||t.loader==='fabric') }
 function inferKind(loaders:string[]):AddonKind { if(loaders.includes('datapack'))return 'datapack';if(loaders.includes('iris')||loaders.includes('optifine'))return 'shader';if(loaders.includes('minecraft'))return 'resourcepack';return 'mod' }
-function project(v:any,kind?:AddonKind):CatalogProject { if(!v||typeof v!=='object')throw new Error('Invalid Modrinth project.');return {id:id(v.project_id||v.id),name:plain(v.title,256),description:plain(v.description),kind:kind||(kinds.includes(v.project_type)?v.project_type:'mod')} }
+function project(v:any,kind?:CatalogKind,detail=false):CatalogProject {
+  if(!v||typeof v!=='object')throw new Error('Invalid Modrinth project.')
+  const count=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0?Number(value):undefined
+  const date=detail?v.updated:v.date_modified??v.updated
+  const categories=Array.isArray(v.display_categories??v.categories)?(v.display_categories??v.categories).slice(0,30).map((s:unknown)=>plain(s,80)):[]
+  return {id:id(v.project_id||v.id),name:plain(v.title,256),description:plain(v.description),kind:kind||([...kinds,'modpack'].includes(v.project_type)?v.project_type:'mod'),author:typeof v.author==='string'?plain(v.author,128):undefined,iconUrl:projectImage(v.icon_url),downloads:count(v.downloads),followers:count(detail?v.followers:v.follows??v.followers),updatedAt:typeof date==='string'&&Number.isFinite(Date.parse(date))?date:undefined,categories:[...new Set<string>([...categories,...(Array.isArray(v.loaders)?v.loaders.slice(0,30).map((s:unknown)=>plain(s,80)):[])])],clientSide:['required','optional','unsupported'].includes(v.client_side)?v.client_side:undefined,serverSide:['required','optional','unsupported'].includes(v.server_side)?v.server_side:undefined}
+}
 function version(v:any,kind?:AddonKind):CatalogVersion {
   if(!v||!Array.isArray(v.game_versions)||v.game_versions.length>2000||!Array.isArray(v.loaders)||v.loaders.length>100||!Array.isArray(v.files)||v.files.length>100||!Array.isArray(v.dependencies)||v.dependencies.length>500||!Number.isFinite(Date.parse(v.date_published)))throw new Error('Invalid Modrinth version metadata.')
   const loaders=v.loaders.map((s:unknown)=>plain(s,80)),gameVersions=v.game_versions.map((s:unknown)=>plain(s,101))
@@ -41,17 +48,17 @@ export class ModrinthCatalog {
     return {value,cached:false}
   }
   async search(q:CatalogQuery):Promise<SearchPage> {
-    if(!q||!kinds.includes(q.kind)||typeof q.query!=='string'||q.query.length>200||!Number.isInteger(q.offset)||q.offset<0||q.offset>10000||!Number.isInteger(q.limit)||q.limit<1||q.limit>50)throw new Error('Invalid catalog search.')
+    if(!q||![...kinds,'modpack'].includes(q.kind)||typeof q.query!=='string'||q.query.length>200||!Number.isInteger(q.offset)||q.offset<0||q.offset>10000||!Number.isInteger(q.limit)||q.limit<1||q.limit>50||!['relevance','downloads','follows','newest','updated'].includes(q.sort||'relevance'))throw new Error('Invalid catalog search.')
     assertVersionId(q.gameVersion)
     const facets=[['project_type:'+q.kind],['versions:'+q.gameVersion]];if(q.kind==='mod')facets.push(['categories:fabric'])
-    const params=new URLSearchParams({query:q.query,facets:JSON.stringify(facets),offset:String(q.offset),limit:String(q.limit)})
+    const params=new URLSearchParams({query:q.query,facets:JSON.stringify(facets),offset:String(q.offset),limit:String(q.limit),index:q.sort||'relevance'})
     const result=await this.request('/search?'+params,data=>{
       if(!Array.isArray(data?.hits)||data.hits.length>q.limit||![data.offset,data.limit,data.total_hits].every(Number.isSafeInteger)||data.offset<0||data.limit<1||data.limit>50||data.total_hits<0)throw new Error('Invalid catalog search results.')
       return {projects:data.hits.map((v:any)=>project(v,q.kind)),offset:data.offset,limit:data.limit,total:data.total_hits}
     })
     return {...result.value,cached:result.cached}
   }
-  async project(projectId:string):Promise<CatalogProject>{return (await this.request('/project/'+id(projectId),v=>project(v))).value}
+  async project(projectId:string,kind?:CatalogKind):Promise<CatalogProjectDetails>{return (await this.request('/project/'+id(projectId),v=>{const p=project(v,kind,true);if(p.id!==projectId)throw new Error('Unexpected project identity.');return {...p,body:plain(v.body??'',256*1024)}})).value}
   async versions(projectId:string,target:AddonTarget):Promise<CatalogVersion[]> {
     if(!kinds.includes(target.kind))throw new Error('Invalid content kind.');assertVersionId(target.gameVersion)
     const params=new URLSearchParams({game_versions:JSON.stringify([target.gameVersion]),loaders:JSON.stringify([loaderTag(target.kind)])})

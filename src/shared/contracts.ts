@@ -1,7 +1,7 @@
 import type { GameProfile, NewProfile } from './profiles'
 export type { GameProfile, Loader, NewProfile } from './profiles'
 import type { AccountIdentity, AccountKind } from './accounts'
-import type { AddonKind,AddonPlan,CatalogQuery,CatalogVersion,ImportPreview,LibraryState,SearchPage } from './addons'
+import type { AddonKind,AddonPlan,CatalogKind,CatalogProjectDetails,CatalogQuery,CatalogVersion,ImportPreview,LibraryState,SearchPage } from './addons'
 export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
   clientId: string
@@ -41,6 +41,8 @@ export interface Snapshot {
 export interface LauncherApi {
   getLibrary():Promise<LibraryState>
   searchAddons(query:Omit<CatalogQuery,'gameVersion'>):Promise<SearchPage>
+  addonDetails(projectId:string,kind:CatalogKind):Promise<CatalogProjectDetails>
+  openProjectLink(url:string):Promise<void>
   addonVersions(projectId:string,kind:AddonKind):Promise<CatalogVersion[]>
   previewAddon(request:{kind:AddonKind;projectId?:string;versionId?:string;worldId?:string}):Promise<AddonPlan>
   installAddon(planId:string):Promise<void>

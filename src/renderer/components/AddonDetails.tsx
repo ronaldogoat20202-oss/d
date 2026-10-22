@@ -1,17 +1,25 @@
+import { useEffect,useRef,useState } from 'react'
+import { ArrowLeft,Download } from 'lucide-react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { AddonPlan,CatalogProject,CatalogVersion } from '../../shared/addons'
-export function AddonDetails({project,versions,versionId,plan,busy,onVersion,onPreview,onInstall,onClose}:{project:CatalogProject;versions:CatalogVersion[];versionId:string;plan:AddonPlan|null;busy:boolean;onVersion(id:string):void;onPreview():void;onInstall():void;onClose():void}){
+import { projectImage,publicProjectLink } from '../../shared/project-links'
+import { ProjectIcon,ProjectStats,ProjectTags,updatedDate } from './CatalogProject'
+export function AddonDetails({project,body,loading,detailError,versions,versionId,plan,busy,targetName='selected profile',initialTab='description',onVersion,onPreview,onInstall,onClose,onLink,onRetry}:{project:CatalogProject;body?:string;loading?:boolean;detailError?:string;versions:CatalogVersion[];versionId:string;plan:AddonPlan|null;busy:boolean;targetName?:string;initialTab?:'description'|'versions';onVersion(id:string):void;onPreview():void;onInstall():void;onClose():void;onLink(url:string):void;onRetry():void}){
+  const [tab,setTab]=useState(initialTab),title=useRef<HTMLHeadingElement>(null)
   const version=versions.find(v=>v.id===versionId)
-  return <section className="panel addon-details" aria-label="Add-on details">
-    <div className="panel-heading"><h2>{project.name}</h2><button className="text-button" onClick={onClose}>Close details</button></div>
-    <p>{project.description}</p>
-    {versions.length?<><label>Compatible version<select disabled={busy} value={versionId} onChange={e=>onVersion(e.target.value)}>{versions.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-      <p>For Minecraft {version?.gameVersions.join(', ')} · {version?.loaders.join(', ')}</p>
-      {!!version?.dependencies.length&&<p>{version.dependencies.filter(d=>d.type==='required').length} required dependencies. Optional dependencies are shown separately.</p>}
-      <button className="secondary" disabled={busy||!version} onClick={onPreview}>Check installation</button>
-    </>:<p>No compatible versions are available for this game profile.</p>}
-    {plan&&<div className="install-preview" aria-label="Installation preview"><h3>Review installation</h3><p>All required files are included below. Existing managed versions may be replaced.</p><ul>{plan.entries.map(e=><li key={e.versionId}>{e.name} <small>{e.kind} · {(e.bytes/1048576).toFixed(1)} MiB</small></li>)}</ul>
-      {!!plan.optionalDependencies.length&&<p>Optional, not installed: {plan.optionalDependencies.join(', ')}</p>}
-      <button className="primary" disabled={busy} onClick={onInstall}>Install {plan.entries.length} {plan.entries.length===1?'file':'files'}</button>
-    </div>}
+  useEffect(()=>{title.current?.focus()},[project.id])
+  return <section className="project-details" aria-label="Project details">
+    <button className="back-results" onClick={onClose}><ArrowLeft size={16}/>Back to results</button>
+    <header className="project-header"><ProjectIcon project={project}/><div className="project-header-copy"><h2 ref={title} tabIndex={-1}>{project.name}</h2><p>{project.description}</p><ProjectStats project={project}/><ProjectTags project={project}/></div><button className="catalog-install" disabled={busy||!version} onClick={onPreview}><Download size={19}/>Install</button></header>
+    <div className="project-tabbar" role="tablist" aria-label="Project information">{(['description','versions'] as const).map((value,i)=><button role="tab" aria-label={value==='description'?'Description':'Versions'} id={`project-tab-${value}`} aria-controls={`project-panel-${value}`} aria-selected={tab===value} tabIndex={tab===value?0:-1} className={tab===value?'selected':''} key={value} onClick={()=>setTab(value)} onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'description':e.key==='End'?'versions':value==='description'?'versions':'description';setTab(next);(e.currentTarget.parentElement?.children[next==='description'?0:1] as HTMLElement)?.focus()}}}>{i===0?'Description':'Versions'}{i===1&&versions.length>0&&<span>{versions.length}</span>}</button>)}</div>
+    {loading&&<p role="status">Loading project details…</p>}
+    {detailError&&<div role="alert" className="error-banner">{detailError} <button className="text-button" onClick={onRetry}>Retry project</button></div>}
+    <div role="tabpanel" id={`project-panel-${tab}`} aria-labelledby={`project-tab-${tab}`} className="project-body panel">
+    {tab==='description'?<div className="project-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url=>url.startsWith('#')?url:publicProjectLink(url)||projectImage(url)||''} components={{a:({href,children})=>{const link=publicProjectLink(href);return link?<a href={link} onClick={e=>{e.preventDefault();onLink(link)}}>{children}</a>:<span>{children}</span>},img:({src,alt})=>{const image=projectImage(src);return image?<img src={image} alt={alt||''} loading="lazy" referrerPolicy="no-referrer"/>:null}}}>{body||(!loading?project.description:'')}</Markdown></div>:<div className="project-versions"><div className="panel-heading"><h3>Compatible versions</h3><span className="provider-label">For your current Minecraft profile</span></div>{versions.map(v=><article className={`project-version ${v.id===versionId?'chosen':''}`} key={v.id}><div><strong>{v.name}</strong><small>Minecraft {v.gameVersions.join(', ')} · {v.loaders.join(', ')} · {updatedDate(v.publishedAt)}</small></div><button className="secondary" disabled={busy} onClick={()=>onVersion(v.id)}>{v.id===versionId?'Selected':'Select version'}</button></article>)}</div>}
+    </div>
+    <section className="panel project-install-options" aria-label="Install options"><div><h3>Install to {targetName}</h3>{versions.length?<><label>Compatible version<select disabled={busy} value={versionId} onChange={e=>onVersion(e.target.value)}>{versions.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label><p>For Minecraft {version?.gameVersions.join(', ')} · {version?.loaders.join(', ')}</p>{!!version?.dependencies.length&&<p>{version.dependencies.filter(d=>d.type==='required').length} required dependencies. Optional dependencies are shown separately.</p>}<button className="secondary" disabled={busy||!version} onClick={onPreview}>Check installation</button></>:!loading&&<p>No compatible versions are available for this game profile.</p>}</div>
+    {plan&&<div className="install-preview" aria-label="Installation preview"><h3>Review installation</h3><p>All required files are included below. Existing managed versions may be replaced.</p><ul>{plan.entries.map(e=><li key={e.versionId}>{e.name} <small>{e.kind} · {(e.bytes/1048576).toFixed(1)} MiB</small></li>)}</ul>{!!plan.optionalDependencies.length&&<p>Optional, not installed: {plan.optionalDependencies.join(', ')}</p>}<button className="catalog-install" disabled={busy} onClick={onInstall}>Install {plan.entries.length} {plan.entries.length===1?'file':'files'}</button></div>}
+    </section>
   </section>
 }

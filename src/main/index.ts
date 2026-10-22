@@ -42,6 +42,7 @@ async function openWindow(): Promise<void> {
     accounts: new AccountService(new MinecraftAuthAdapter(), new CredentialStore(directory, safeStorage), new AccountStore(directory)),
     pickJava: () => pick(['openFile'], 'Choose the Java executable (java.exe)'),
     pickGameDirectory: () => pick(['openDirectory', 'createDirectory'], 'Choose Minecraft game folder'),
+    openProjectLink:async url=>{await shell.openExternal(url)},
     openVerification: async url => { if (!allowedExternalUrl(url)) throw new Error('Unexpected verification page.'); await shell.openExternal(url) },
     writeClipboard: text => clipboard.writeText(text)
   })

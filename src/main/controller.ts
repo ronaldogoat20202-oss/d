@@ -8,11 +8,12 @@ import type { InstallService } from './services/installer'
 import type { FabricService } from './services/fabric'
 import type { AddonService,ContentRequest } from './services/addons'
 import type { ModrinthCatalog } from './adapters/modrinth'
-import type { AddonKind,CatalogQuery } from '../shared/addons'
+import type { AddonKind,CatalogKind,CatalogQuery } from '../shared/addons'
 import type { AccountService } from './services/accounts'
 import type { JavaService } from './services/java'
 import type { LogService } from './services/logs'
 import type { launchGame } from './services/game'
+import { publicProjectLink } from '../shared/project-links'
 import { resolveClientId } from './services/auth-config'
 import type { RuntimePort } from './services/types'
 
@@ -33,6 +34,7 @@ export interface ControllerDependencies {
   runtime: RuntimePort
   pickJava?: () => Promise<string | null>
   pickGameDirectory?: () => Promise<string | null>
+  openProjectLink?: (url:string)=>Promise<void>
   openVerification?: (url: string) => Promise<void>
   writeClipboard?: (text: string) => void
 }
@@ -243,11 +245,14 @@ export class Controller {
   }
   async getLibrary(){const profile=this.profile(),revision=this.profileRevision,result=await this.addons().library(profile);if(revision!==this.profileRevision)throw new Error('The game profile changed. Refresh the library.');return result}
   async searchAddons(query:Omit<CatalogQuery,'gameVersion'>){
-    this.fields(query,['kind','query','offset','limit']);this.kind(query.kind)
+    this.fields(query,['kind','query','offset','limit','sort']);this.catalogKind(query.kind)
     if(!this.deps.catalog)throw new Error('Modrinth is unavailable.')
     const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.search({...query,gameVersion:p.minecraftVersion})
     if(revision!==this.profileRevision)throw new Error('The game profile changed. Search again.');return result
   }
+  private catalogKind(value:unknown):asserts value is CatalogKind{if(!['mod','resourcepack','datapack','shader','modpack'].includes(value as string))throw new Error('Invalid catalog kind.')}
+  async addonDetails(projectId:string,kind:CatalogKind){this.identifier(projectId);this.catalogKind(kind);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const revision=this.profileRevision;const result=await this.deps.catalog.project(projectId,kind);if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the project again.');return result}
+  async openProjectLink(url:string){const safe=publicProjectLink(url);if(!safe||!this.deps.openProjectLink)throw new Error('This project link cannot be opened. Only public HTTPS websites are supported.');await this.deps.openProjectLink(safe)}
   async addonVersions(projectId:string,kind:AddonKind){this.identifier(projectId);this.kind(kind);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.versions(projectId,{kind,gameVersion:p.minecraftVersion,loader:p.loader.kind});if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the add-on again.');return result}
   async previewAddon(request:ContentRequest){this.fields(request,['kind','projectId','versionId','worldId']);this.kind(request.kind);if(request.projectId!==undefined)this.identifier(request.projectId);if(request.versionId!==undefined)this.identifier(request.versionId);this.world(request.worldId);return this.content('Checking compatibility and dependencies',(p)=>this.addons().plan(p,request))}
   async installAddon(id:string){this.identifier(id);return this.content('Installing add-ons',(p,progress)=>this.addons().install(p,id,progress))}
@@ -258,6 +263,6 @@ export class Controller {
   async updateAddon(id:string){this.identifier(id);return this.content('Updating compatible add-on',(p,progress)=>this.addons().update(p,id,progress))}
   async repairAddons(){return this.content('Recovering interrupted changes',p=>this.addons().recover(p))}
   api(): Omit<LauncherApi, 'subscribe'> {
-    return { getLibrary:()=>this.getLibrary(),searchAddons:q=>this.searchAddons(q),addonVersions:(id,kind)=>this.addonVersions(id,kind),previewAddon:r=>this.previewAddon(r),installAddon:id=>this.installAddon(id),previewImport:(kind,world)=>this.previewImport(kind,world),installImport:(id,allow)=>this.installImport(id,allow),setAddonEnabled:(id,enabled)=>this.setAddonEnabled(id,enabled),removeAddon:id=>this.removeAddon(id),updateAddon:id=>this.updateAddon(id),repairAddons:()=>this.repairAddons(), createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+    return { addonDetails:(id,kind)=>this.addonDetails(id,kind),openProjectLink:url=>this.openProjectLink(url),getLibrary:()=>this.getLibrary(),searchAddons:q=>this.searchAddons(q),addonVersions:(id,kind)=>this.addonVersions(id,kind),previewAddon:r=>this.previewAddon(r),installAddon:id=>this.installAddon(id),previewImport:(kind,world)=>this.previewImport(kind,world),installImport:(id,allow)=>this.installImport(id,allow),setAddonEnabled:(id,enabled)=>this.setAddonEnabled(id,enabled),removeAddon:id=>this.removeAddon(id),updateAddon:id=>this.updateAddon(id),repairAddons:()=>this.repairAddons(), createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
   }
 }

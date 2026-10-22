@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron'
 import type { LauncherApi } from '../shared/contracts'
 
-export const PUBLIC_METHODS = ['getLibrary','searchAddons','addonVersions','previewAddon','installAddon','previewImport','installImport','setAddonEnabled','removeAddon','updateAddon','repairAddons','createOfflineAccount', 'selectAccount', 'removeAccount', 'getSnapshot', 'refreshVersions', 'saveSettings', 'createProfile', 'selectProfile', 'renameProfile', 'removeProfile', 'signIn', 'cancelSignIn',
+export const PUBLIC_METHODS = ['addonDetails','openProjectLink','getLibrary','searchAddons','addonVersions','previewAddon','installAddon','previewImport','installImport','setAddonEnabled','removeAddon','updateAddon','repairAddons','createOfflineAccount', 'selectAccount', 'removeAccount', 'getSnapshot', 'refreshVersions', 'saveSettings', 'createProfile', 'selectProfile', 'renameProfile', 'removeProfile', 'signIn', 'cancelSignIn',
   'signOut', 'chooseJava', 'chooseGameDirectory', 'install', 'launch', 'copyLogs'] as const
 
 export function assertTrustedSender(
@@ -21,7 +21,7 @@ export function registerIpc(
     ipc.removeHandler(`orbit:${method}`)
     ipc.handle(`orbit:${method}`, async (event, ...args: unknown[]) => {
       assertTrustedSender(event, window, expectedUrl)
-      const arity:Partial<Record<typeof method,[number,number]>>={searchAddons:[1,1],addonVersions:[2,2],previewAddon:[1,1],installAddon:[1,1],previewImport:[1,2],installImport:[2,2],setAddonEnabled:[2,2],removeAddon:[1,1],updateAddon:[1,1],createOfflineAccount:[1,1],selectAccount:[2,2],removeAccount:[2,2],saveSettings:[1,1],createProfile:[1,1],selectProfile:[1,1],renameProfile:[2,2],removeProfile:[1,1]}
+      const arity:Partial<Record<typeof method,[number,number]>>={addonDetails:[2,2],openProjectLink:[1,1],searchAddons:[1,1],addonVersions:[2,2],previewAddon:[1,1],installAddon:[1,1],previewImport:[1,2],installImport:[2,2],setAddonEnabled:[2,2],removeAddon:[1,1],updateAddon:[1,1],createOfflineAccount:[1,1],selectAccount:[2,2],removeAccount:[2,2],saveSettings:[1,1],createProfile:[1,1],selectProfile:[1,1],renameProfile:[2,2],removeProfile:[1,1]}
       const [min,max]=arity[method]||[0,0];if(args.length<min||args.length>max)throw new Error('Invalid launcher arguments.')
       return (api[method] as (...args: unknown[]) => Promise<unknown>)(...args)
     })

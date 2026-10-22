@@ -1,0 +1,11 @@
+# Orbit Library browser
+
+The user wants the supplied Modrinth-style catalog and full project page, including functional Modpacks and Servers tabs. Preserve the Native execution preference: implement here; delegate research and one final review only.
+
+- Six tabs: Modpacks, Mods, Resource packs, Data packs, Shaders, Servers. Keep Mods as the initial tab for existing users.
+- Catalog: full-width search, relevance/downloads/followers/newest/updated sorts, 10/20/50 rows per page, numbered navigation, project icon, author, summary, tags and real download/follower/updated statistics. Unknown metadata is omitted. No fake catalog results.
+- Clicking a title/row or Add opens a full project view. Back preserves catalog state. Description renders safe Markdown; Versions shows compatible versions. Installation still previews required files before committing. Preserve datapack world selection, local imports, installed management and recovery.
+- Modpacks: browse Modrinth .mrpack releases for the selected Minecraft version. Preview package contents and create a separate Vanilla/Fabric profile using the pack's exact versions. Reject unsupported loaders with actionable copy. Verify archive/file size and SHA512, block traversal/links/duplicates and unapproved hosts, exclude server-only files, skip optional downloads visibly, stage files before publishing the new profile. Original profile files remain intact on failures.
+- Servers: save/edit/remove named Java server addresses locally; join with the selected installed profile/account. Validate address and ports, pass arguments without a shell. Use modern Quick Play when supported and legacy server flags on older releases. Online servers still enforce Microsoft account ownership; offline accounts only join servers that allow them. No invented server directory or status.
+- Keep Electron sandbox, trusted IPC sender/arity checks, denied navigation and exact CDN image policy. Never render raw remote HTML. Open public HTTPS project links only after explicit user click.
+- Windows x64 remains the delivery target. Verify types, full unit suite, browser flows at 900×650 and a production Electron smoke. Build actual Windows installer through existing CI when ready; report untested real account/gameplay limits accurately.
