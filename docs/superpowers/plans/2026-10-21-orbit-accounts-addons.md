@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Execution status:** Tasks1–9 implemented and verified. Task10 local/live/desktop verification passed; independent review and Windows artifact delivery are in progress.
+
 **Goal:** Add familiar Microsoft browser login, persistent offline profiles, isolated Vanilla/Fabric game profiles, and a working mods/packs/shaders library to Orbit.
 
 **Architecture:** Retain the Electron/React application and main-process controller, with focused account, profile, Fabric, catalog, and managed-content services. Share verified vanilla resources across isolated instance directories. Use typed IPC for user intentions; filesystem paths, authentication, dependency resolution, and content transactions stay in the main process.

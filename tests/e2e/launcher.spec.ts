@@ -66,6 +66,7 @@ test('creates a Fabric profile and manages mods and per-world data packs at mini
   await page.getByRole('button',{name:/Fixture datapack Renderer test content/}).click();await page.getByRole('button',{name:'Check installation'}).click();await page.getByRole('button',{name:'Install 1 file',exact:true}).click()
   await expect(page.getByText(/Enabled.*Test World/)).toBeVisible()
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true)
+  await page.evaluate(()=>window.scrollTo(0,0))
   await page.screenshot({path:'test-results/orbit-library-900.png',fullPage:true})
 })
 test('desktop appearance without injected account or versions',async({page})=>{

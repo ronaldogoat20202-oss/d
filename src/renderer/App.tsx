@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { version } from '../../package.json'
 import { ArrowUpRight, Box, Compass, FileText, Settings2, Sparkles } from 'lucide-react'
 import type { Snapshot } from '../shared/contracts'
 import { SettingsView } from './components/SettingsView'
@@ -29,7 +30,7 @@ export default function App() {
         return <button key={name} className={`nav-item ${page === name ? 'active' : ''}`} onClick={() => setPage(name)}><Icon size={19}/>{name}{page === name && <span className="active-dot"/>}</button>
       })}</nav>
       <div className="sidebar-bottom"><span className="mini-cube"><Box size={21}/></span><div><strong>Minecraft Java</strong><small>Your worlds, your way.</small></div></div>
-      <div className="sidebar-version">ORBIT LAUNCHER <span>v0.1.0</span></div>
+      <div className="sidebar-version">ORBIT LAUNCHER <span>v{version}</span></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <strong>{page}</strong></div><span className="edition-tag"><span className="status-dot"/> JAVA EDITION</span></header>

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir,readdir } from 'node:fs/promises'
+import { readFile,readdir,stat } from 'node:fs/promises'
 import { basename,join,relative } from 'node:path'
 import type { AddonKind,AddonPlan,AddonRequest,AddonTarget,CatalogVersion,ImportPreview,LibraryState,ManagedAddon } from '../../shared/addons'
 import type { GameProfile } from '../../shared/profiles'
@@ -11,8 +11,8 @@ import * as worldsDefault from './worlds'
 import { addonPath,readManifest,safeFilename,type AddonManifest } from './addon-manifest'
 import { AddonTransactions,unchanged,type AddonWrite } from './addon-transactions'
 import { assertModrinthUrl,networkFetch,type FetchPort } from './network'
-import { downloadFile,validFile } from './downloads'
-import { matchesFabricVersion } from './fabric-predicates'
+import { downloadFile,safeDestination,validFile } from './downloads'
+import { compareFabricVersions,matchesFabricVersion } from './fabric-predicates'
 type Progress=(value:DownloadProgress)=>void
 export interface ContentRequest extends AddonRequest { kind:AddonKind; worldId?:string }
 interface Prepared { id:string; context:string; profileId:string; before:string; versions:CatalogVersion[]; worldId:string|null; expires:number; optional:string[] }
@@ -47,13 +47,28 @@ export class AddonService {
     try{for(const name of await readdir(join(p.gameDirectory,'mods'))){if(!name.toLowerCase().endsWith('.jar')||managedNames.has(name.toLowerCase()))continue;safeFilename(name);const path=await addonPath(p,'mods/'+name);for(const mod of(await this.imports.inspectArchive(path)).mods)units.push({mod,owner:null})}}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e}
     return units
   }
-  private check(p:GameProfile,units:ModUnit[],needsIris=false):void{
-    const java=Number(p.minecraftVersion.split('.')[1])>=21||/^1\.20\.[5-9]/.test(p.minecraftVersion)?'21':Number(p.minecraftVersion.split('.')[1])>=18?'17':Number(p.minecraftVersion.split('.')[1])===17?'16':'8'
-    const available=new Map<string,{version:string;owner:string|null}>();available.set('minecraft',{version:p.minecraftVersion,owner:null});available.set('java',{version:java,owner:null})
+  private async javaMajor(p:GameProfile):Promise<number|undefined>{
+    const path=join(p.libraryRoot,'versions',p.minecraftVersion,p.minecraftVersion+'.json');await safeDestination(p.libraryRoot,path)
+    try{if((await stat(path)).size>4*1024**2)throw new Error('Minecraft metadata exceeds the size limit.');const major=JSON.parse(await readFile(path,'utf8')).javaVersion?.majorVersion;if(major!==undefined&&(!Number.isInteger(major)||major<1||major>255))throw new Error('Invalid Minecraft Java metadata.');return major}
+    catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw e}
+  }
+  private check(p:GameProfile,units:ModUnit[],needsIris=false,javaMajor?:number):void{
+    const available=new Map<string,{version:string;owner:string|null}>();available.set('minecraft',{version:p.minecraftVersion,owner:null});if(javaMajor)available.set('java',{version:String(javaMajor),owner:null})
     if(p.loader.kind==='fabric')available.set('fabricloader',{version:p.loader.version,owner:null})
-    for(const unit of units)for(const id of[unit.mod.id,...unit.mod.provides]){if(available.has(id))throw new Error(`Conflicting rendering/mod identity: ${id}. Disable or remove the conflicting mod.`);available.set(id,{version:unit.mod.version,owner:unit.owner})}
-    for(const {mod}of units){
-      for(const[id,predicate]of Object.entries(mod.depends)){const item=available.get(id);if(!item||!matchesFabricVersion(item.version,predicate))throw new DependencyError(`${mod.name} requires ${id} ${JSON.stringify(predicate)}. Enable or install compatible required dependencies.`,item?.owner||null,id,predicate)}
+    const roots=units.filter(u=>!u.mod.nested),nested=new Map<string,ModUnit[]>(),selected=new Map<string,ModUnit>()
+    for(const unit of roots)for(const id of[unit.mod.id,...unit.mod.provides]){if(available.has(id))throw new Error(`Conflicting rendering/mod identity: ${id}. Disable or remove the conflicting mod.`);available.set(id,{version:unit.mod.version,owner:unit.owner})}
+    for(const unit of units.filter(u=>u.mod.nested)){if(available.has(unit.mod.id))continue;const group=nested.get(unit.mod.id)||[];group.push(unit);nested.set(unit.mod.id,group)}
+    for(const [id,group]of nested){group.sort((a,b)=>compareFabricVersions(b.mod.version,a.mod.version));selected.set(id,group[0])}
+    // Bundled modules can appear in several JARs. Select one version that meets
+    // the requirements of the selected bundle; top-level mods remain mandatory.
+    for(let attempt=0;attempt<32;attempt++){
+      const all=[...roots,...selected.values()];let changed=false
+      for(const[id,candidates]of nested){const predicates=all.flatMap(u=>u.mod.depends[id]?[u.mod.depends[id]]:[]);const next=candidates.find(c=>predicates.every(predicate=>matchesFabricVersion(c.mod.version,predicate)));if(!next)throw new Error(`Bundled dependency conflict for ${id}.`);if(next!==selected.get(id)){selected.set(id,next);changed=true}}
+      if(!changed)break;if(attempt===31)throw new Error('Bundled Fabric dependency resolution exceeded its limit.')
+    }
+    for(const unit of selected.values())for(const id of[unit.mod.id,...unit.mod.provides]){if(available.has(id))throw new Error(`Conflicting mod identity: ${id}.`);available.set(id,{version:unit.mod.version,owner:unit.owner})}
+    for(const {mod}of [...roots,...selected.values()]){
+      for(const[id,predicate]of Object.entries(mod.depends)){if(id==='java'&&!javaMajor)continue;const item=available.get(id);if(!item||!matchesFabricVersion(item.version,predicate))throw new DependencyError(`${mod.name} requires ${id} ${JSON.stringify(predicate)}. Enable or install compatible required dependencies.`,item?.owner||null,id,predicate)}
       for(const[id,predicate]of Object.entries(mod.breaks)){const item=available.get(id);if(item&&matchesFabricVersion(item.version,predicate))throw new Error(`${mod.name} declares an incompatible mod: ${id}.`)}
     }
     if(needsIris&&(!available.has('iris')||available.has('optifabric')||available.has('optifine')))throw new Error('Shader packs require compatible Iris in a Fabric profile without conflicting rendering mods.')
@@ -63,7 +78,7 @@ export class AddonService {
     if(request?.kind==='datapack'){if(!request.worldId)throw new Error('Choose an existing world for this data pack.');await this.worlds.resolveWorld(p,request.worldId)}
     if((request?.kind==='mod'||request?.kind==='shader'||needsIris)&&p.loader.kind!=='fabric')throw new Error('Mods and Iris shader packs require a Fabric game profile.')
     const roots:ContentRequest[]=request?[request]:[]
-    const existingUnits=await this.units(p,manifest.entries)
+    const existingUnits=await this.units(p,manifest.entries),javaMajor=await this.javaMajor(p)
     if((request?.kind==='shader'||needsIris)&&!existingUnits.some(u=>u.mod.id==='iris'))roots.push({kind:'mod',projectId:IRIS})
     const pinned=new Map<string,CatalogVersion>(),seen=new Set<string>();let versions:CatalogVersion[]=[],optional:string[]=[]
     for(let attempt=0;attempt<32;attempt++){
@@ -74,7 +89,7 @@ export class AddonService {
       optional=Array.from(new Set(resolved.flatMap(g=>g.optionalDependencies)))
       const units=existingUnits.filter(u=>!u.owner||!byProject.has(u.owner))
       for(const v of versions){const path=await this.cache(p,v,()=>{});if(v.kind==='mod')for(const mod of(await this.imports.inspectArchive(path)).mods)units.push({mod,owner:v.projectId})}
-      try{this.check(p,units,request?.kind==='shader'||needsIris);break}
+      try{this.check(p,units,request?.kind==='shader'||needsIris,javaMajor);break}
       catch(error){
         if(!(error instanceof DependencyError)||!error.projectId||roots.some(r=>r.projectId===error.projectId)||attempt===31)throw error
         const candidates=await this.catalog.versions(error.projectId,target(p,'mod'));let replacement:CatalogVersion|undefined
@@ -108,9 +123,9 @@ export class AddonService {
     }
     return {after,writes,sources}
   }
-  private async validate(p:GameProfile,entries:ManagedAddon[],sources?:Map<string,string>,knownEntries=entries){
+  private async validate(p:GameProfile,entries:ManagedAddon[],sources?:Map<string,string>,knownEntries=entries,javaMajor?:number){
     for(const e of entries.filter(e=>e.enabled)){if(e.gameVersion!==p.minecraftVersion||e.loader!==p.loader.kind)throw new Error('Managed content belongs to another Minecraft version or loader.');if(e.kind==='datapack')await this.worlds.resolveWorld(p,e.worldId!)}
-    this.check(p,await this.units(p,entries,sources,knownEntries),entries.some(e=>e.enabled&&e.kind==='shader'))
+    this.check(p,await this.units(p,entries,sources,knownEntries),entries.some(e=>e.enabled&&e.kind==='shader'),javaMajor??await this.javaMajor(p))
     const active=new Set(entries.filter(e=>e.enabled).flatMap(e=>[e.id,e.projectId,e.versionId].filter(Boolean)))
     for(const e of entries.filter(e=>e.enabled))for(const dep of e.dependencies)if(!active.has(dep))throw new Error(`${e.name} requires another enabled dependency.`)
   }
@@ -154,5 +169,5 @@ export class AddonService {
     })
   }
   async recover(p:GameProfile):Promise<void>{return this.lock(p,()=>this.transactions.recover(p))}
-  async assertReady(p:GameProfile):Promise<void>{await this.ready(p);const manifest=await readManifest(p);for(const e of manifest.entries.filter(e=>e.enabled))await unchanged(p,e.relativePath,e.sha512);await this.validate(p,manifest.entries)}
+  async assertReady(p:GameProfile,javaMajor?:number):Promise<void>{await this.ready(p);const manifest=await readManifest(p);for(const e of manifest.entries.filter(e=>e.enabled))await unchanged(p,e.relativePath,e.sha512);await this.validate(p,manifest.entries,undefined,manifest.entries,javaMajor)}
 }

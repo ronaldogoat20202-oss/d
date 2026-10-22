@@ -6,7 +6,7 @@ import { crc32 } from 'node:zlib'
 import { open,openEntryReadStream,walkEntriesGenerator } from '@xmcl/unzip'
 import type { AddonKind,AddonTarget } from '../../shared/addons'
 import { matchesFabricVersion } from './fabric-predicates'
-export interface FabricMod { id:string; name:string; version:string; provides:string[]; depends:Record<string,string|string[]>; breaks:Record<string,string|string[]> }
+export interface FabricMod { id:string; name:string; version:string; nested:boolean; provides:string[]; depends:Record<string,string|string[]>; breaks:Record<string,string|string[]> }
 export interface ArchiveInfo { names:Set<string>; mods:FabricMod[]; pack:unknown|null }
 interface Budget { entries:number; metadata:number; nested:number }
 const MAX_FILE=512*1024**2,MAX_METADATA=262144,MAX_TOTAL=1048576
@@ -47,7 +47,7 @@ async function archive(input:string|Buffer,budget:Budget,depth=0):Promise<Archiv
         return value
       }
       const provides=raw.provides||[];if(!Array.isArray(provides)||provides.length>100||!provides.every(p=>typeof p==='string'&&/^[a-z][a-z0-9_-]{1,63}$/.test(p)))throw new Error('Invalid Fabric provided IDs.')
-      mods.push({id:raw.id,name:typeof raw.name==='string'?raw.name.slice(0,256):raw.id,version:raw.version,provides,depends:constraints(raw.depends),breaks:constraints(raw.breaks)})
+      mods.push({id:raw.id,name:typeof raw.name==='string'?raw.name.slice(0,256):raw.id,version:raw.version,nested:depth>0,provides,depends:constraints(raw.depends),breaks:constraints(raw.breaks)})
       if(raw.jars!==undefined){if(!Array.isArray(raw.jars)||raw.jars.length>100)throw new Error('Invalid nested mod declarations.');for(const nested of raw.jars){if(typeof nested.file!=='string'||!nested.file.endsWith('.jar'))throw new Error('Invalid nested mod path.');mods.push(...(await archive(await read(nested.file,true),budget,depth+1)).mods)}}
     }
     const pack=entries.has('pack.mcmeta')?JSON.parse((await read('pack.mcmeta')).toString('utf8')):null

@@ -1,7 +1,7 @@
 # Orbit accounts and add-ons design
 
 Date: 2026-10-21
-Status: written specification approved; implementation plan in preparation
+Status: implementation complete through Library integration; final review and Windows delivery in progress
 Baseline: `ec616bf` on `work`
 
 ## Intent and agreed scope

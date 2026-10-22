@@ -75,6 +75,22 @@ it('previews Iris before importing an unverified local shader',async()=>{
   await expect(s.commitImport(p,preview.id,false,()=>{})).rejects.toThrow(/confirm|unverified/i)
   await s.commitImport(p,preview.id,true,()=>{});await s.assertReady(p)
 })
+it('resolves duplicate bundled Fabric modules while rejecting duplicate top-level mods',async()=>{
+  const {fixture:f,profile:p,service:s}=setup()
+  const nested=(id:string,version:string)=>zipFixture(f.mod(id,version))
+  const withModule=(id:string,version:string)=>({'fabric.mod.json':JSON.stringify({schemaVersion:1,id,version:'1.0.0',depends:{minecraft:'1.21.x',shared_module:'>=1'},jars:[{file:'META-INF/jars/shared.jar'}]}),'META-INF/jars/shared.jar':nested('shared_module',version)})
+  f.add('dep','dep-v1',withModule('dependency','1.0.0'))
+  f.add('main','main-v1',withModule('mainmod','2.0.0'),'mod',[{project_id:'dep',version_id:null,dependency_type:'required'}])
+  const plan=await s.plan(p,{kind:'mod',projectId:'main'});await s.install(p,plan.id,()=>{});await s.assertReady(p)
+  f.add('duplicate','duplicate-v1',f.mod('mainmod'))
+  await expect(s.plan(p,{kind:'mod',projectId:'duplicate'})).rejects.toThrow(/conflict/i)
+})
+it('uses official local Java metadata for modern Minecraft versions instead of guessing from the version name',async()=>{
+  const {fixture:f,profile:p,service:s}=setup();p.minecraftVersion='26.1.1'
+  const raw=f.add('modern','modern-v1',f.mod('modernmod','1.0.0',{minecraft:'26.1.x',java:'>=25'}));raw.game_versions=['26.1.1']
+  await mkdir(join(p.libraryRoot,'versions/26.1.1'),{recursive:true});await writeFile(join(p.libraryRoot,'versions/26.1.1/26.1.1.json'),JSON.stringify({javaVersion:{majorVersion:25}}))
+  const plan=await s.plan(p,{kind:'mod',projectId:'modern'});await s.install(p,plan.id,()=>{});await s.assertReady(p,25)
+})
 it('targets resource packs, per-world data packs and shaders, including compatible Iris dependencies',async()=>{
   const {fixture:f,profile:p,service:s}=setup()
   await mkdir(join(p.gameDirectory,'saves/World'),{recursive:true});await writeFile(join(p.gameDirectory,'saves/World/level.dat'),'world')

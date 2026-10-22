@@ -203,7 +203,7 @@ export class Controller {
     try {
       const version = await this.installer(profile).inspect(release, profile.libraryRoot)
       if (!version) { this.state.profileInstallation = 'missing'; throw new Error('Install or repair this Minecraft release before launching.') }
-      await this.deps.addons?.assertReady(profile)
+      await this.deps.addons?.assertReady(profile,version.javaMajor)
       await mkdir(profile.libraryRoot, {recursive:true}); await safeDestination(profile.libraryRoot, profile.gameDirectory + '/.orbit-check'); await mkdir(profile.gameDirectory, {recursive:true})
       const session = await this.deps.accounts.session(this.state.settings.clientId)
       const assertAuthorized = () => {

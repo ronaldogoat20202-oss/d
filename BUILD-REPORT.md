@@ -1,49 +1,55 @@
-# Orbit Launcher build report
+# Orbit Launcher 0.2.0 verification report
 
-Date: 2026-10-21. Implementation: Native. Production code commit: `1806cf0`.
+Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review and Windows delivery are in progress.
 
-## What you can test
+## Implemented
 
-On Windows x64, open `release/Orbit-Launcher-0.1.0-Portable.exe`. It contains the Electron app and needs no Node.js installation. Configure your own public Microsoft application ID and a compatible x64 Java executable in Settings before playing. Sign-in may require Minecraft API approval for that application. Game files can be installed before sign-in.
+Microsoft system-browser authorization-code PKCE with cancellable loopback callback; publisher build configuration; saved offline account identities; isolated retained Vanilla/Fabric profiles; pinned stable Fabric installation; Modrinth browsing/version/dependency previews; bounded local imports; resource packs, per-world data packs and Iris shaders; managed enable/disable/update/removal; journaled recovery; typed Library IPC and UI.
 
-For source testing, extract `Orbit-Launcher-0.1.0-Source.zip`, open PowerShell in its project folder, then run `npm ci` and `npm run dev`. These local commits have not been pushed or published.
+Actual Fabric metadata is checked before content commit. Live Iris testing found and corrected both an incompatible latest Sodium selection and legitimate duplicate bundled Fabric modules. Supported predicates implement Fabric semantics rather than applying npm caret/exact semantics unchanged. Unsupported predicates or graphs fail explicitly; this is a conservative validator, not a complete replacement for Fabric's SAT solver.
 
-## Verified in the cloud
+## Verification evidence
 
-- A clean `npm ci`, including the explicit Electron binary installation, completed.
-- `npm run typecheck` and `npm run build` passed.
-- `npm test`: **61 passed**, 15 test files.
-- `npm run test:e2e`: **3 passed**, using the browser test bridge.
-- The real built Electron app started, rendered its Play screen, and returned signed-out/idle state through the production preload bridge under headless Linux.
-- The packaged production `app.asar` also started under Linux Electron. Both smoke processes closed afterward.
-- The pinned core/archive combination extracted and read a temporary ZIP native-library fixture correctly; no native DLL was executed.
-- `npm run dist:portable` completed with exit 0 after the review fixes. Its outer executable is a self-extracting Windows wrapper; its inner application is Windows x64.
-- Artifact TLS and published package/artifact checksum validation stayed enabled.
+- Type checking and production build: exit 0 during Library integration and release checks.
+- Automated service/renderer suite: latest completed release run **151 passed, 1 opt-in live test skipped**, including the modern Java-metadata regression/fix.
+- Browser flows: **4 passed**, including offline account/install/launch simulation, Fabric profile/mod/per-world data-pack management, empty state and 900×650 overflow checks. These use injected test data.
+- Explicit live provider check: official release list, Fabric stable-loader/profile metadata, Modrinth data/shader searches, and real Iris/Sodium bundle download, hashes, installation and manifest compatibility check passed. It did not start Minecraft or render shaders.
+- The real production Electron app started under headless Linux using an isolated user-data directory. Its production preload created a saved offline account, resolved stable Fabric loader0.19.5 forMinecraft1.21.1, created a real game profile and returned its empty Library state. The actual Library screen rendered. No test bridge was injected; Minecraft itself was not started. Independent whole-change review is pending.
+- TLS/checksum verification remains enabled; no Microsoft client identity or credentials were borrowed.
 
-## Review and corrections
+## External prerequisites and practical limits
 
-One fresh independent whole-branch review found no Critical findings, two Important findings, and a settings issue reclassified as Important because it discards required first-run configuration. All three were corrected in one fix pass, with observed failing regressions followed by a green full suite:
+No registered Orbit Microsoft client ID or owning-account session was supplied. Microsoft sign-in remains unavailable in unconfigured builds; offline profiles are usable. Real Microsoft/Xbox/Minecraft login and entitlement validation remain unverified. The publisher registration/build variable instructions are in README.
 
-1. Signing out invalidates a pending launch, including the actual process-spawn boundary after asynchronous core prechecks. Regression tests require zero game spawns.
-2. Detecting a corrupt installation removes the installed indicator and exposes the Install action for repair; the fixture test repairs it successfully.
-3. Browsing for Java or a game folder preserves unsaved settings such as the public application ID.
+Actual Windows execution, compatible Java native loading, game startup, opening a world, mod behavior and shader rendering require the README manual acceptance checks. Linux Electron and browser checks do not prove these.
 
-No review findings were deferred as minor polish. The corrections were verified by regression tests rather than a second review.
+Archive limits: 100000 total entries; 262144 bytes per inspected metadata entry; 1048576 total metadata bytes; nested JARs limited to depth3,64MiB each,128MiB aggregate; outer archives capped512MiB. Unknown pack compatibility requires confirmation. Only a supported subset of Fabric version predicates/graphs is accepted. Unmanaged files are not modified or adopted.
 
-## Still unverified or blocked
+## Delivery
 
-- Live Microsoft/Xbox/Minecraft account authentication and entitlement checks: no real application registration/account was supplied.
-- Opening the executable on a real Windows machine, Java native-library loading there, and loading a Minecraft world: use the README manual checklist.
-- Real game downloads in this cloud instance: the original official metadata request received a proxy denial. Required domains were saved in the draft; that does not apply the policy.
-- The NSIS Setup installer: the Linux Wine toolset failed to load `ntdll`. Partial Setup executables were removed. The included Windows CI job can build it, but that job has not run here.
+Expected CI artifact: **Orbit-Launcher-Windows-x64**, containing **Orbit-Launcher-0.2.0-Setup.exe**. Final successful run/artifact link will be recorded after the authorized push. Workspace `.exe` previews are not a download mechanism. The installer is unsigned. The old0.1.0 portable file is not the updated application.
 
-The portable executable is **unsigned**. A successful cross-build and Linux packaged-archive smoke check do not prove Windows gameplay.
+## Review and decisions
 
-## Reusable cloud configuration
+One fresh whole-change reviewer will inspect the upgrade after local verification. Confirmed Important/Critical findings get one regression-tested fix pass. No per-task reviewer loops were used.
 
-The environment draft contains tested installation instructions, startup/check instructions, and the twelve required official Minecraft/Microsoft/Xbox domains, preserving package-manager presets. No secret values were saved. Review and save environment settings, then publish to activate the prepared configuration. Saving a draft does not apply network policy or publish a filesystem snapshot. Fresh-task restoration has not been tested; local-only commits remain local, so the source ZIP is also provided.
+### Upgrade rulings
 
-## Rulings I made
+- Ruling: Cloud skill helper scripts/resources are not filesystem-mounted; use extracted task briefs and this manual ledger — same audit record, no product effect.
+- Task 3: Ruling: core typing excludes msa although runtime defaults to msa; omit explicit userType only for Microsoft and supply legacy for local — preserves actual SDK behavior — cost if wrong: authenticated argument compatibility, covered by generated-argument tests.
+- Task 3: Ruling: core leaves empty clientid/XUID substitutions unresolved; omit these optional Microsoft-only argument pairs for offline launches — represents absent online identity without fake identifiers — cost if wrong: future metadata argument shapes require adapter update; actual generated-argument regression covers current strings/rule arrays.
+- Tasks 6/8: Ruling: live Iris1.8.8 forMC1.21.1 requires Sodium0.6.x while catalog latest matchingMC/loader is Sodium0.8.13; resolve actual Fabric metadata dependency version constraints before committing installs, not only catalog project links — necessary for usable shader launch — cost if wrong: conservative rejection of unsupported predicates; tests cover real Iris/Sodium shape.
+- Task 6: Ruling: AddonTarget includes requested kind explicitly — v2 datapack search reports mod project_type, so version normalization needs content context — cost if wrong: one extra internal field to migrate.
+- Task 7: Ruling: old ZIP stream wrapper stalls under Node24 async iteration; bounded event-based reading verified with real archive and retained per-entry/total limits — cost if wrong: stream error handling regression, covered by malformed and oversized archive tests.
+- Task 7: Ruling: inspect actual declared nested mod JARs with depth3,64MiB each,128MiB total bounds, and implement supported Fabric predicate primitives rather than npm range shortcuts — Fabric caret/exact syntax differs — cost if wrong: conservatively rejected future predicates.
+- Task 8: Ruling: compatibility planning downloads verified archives before confirmation so actual Iris/Sodium manifest constraints determine the shown dependency plan — API compatibility alone is insufficient — cost if wrong: additional preview bandwidth/cache.
+- Task 9: Ruling: addonVersions accepts explicit content kind as well as project ID — preserves datapack context across v2 project-type normalization — cost if wrong: additional typed IPC argument.
+
+- Task 10: Ruling: normalize duplicate bundled module candidates with supported dependency predicates; preserve strict conflict errors for duplicate top-level IDs — actual Iris/Sodium both embed fabric-api-base — cost if wrong: conservative rejection of more complex valid Fabric graphs; real bundle now passes.
+- Task 10: Ruling: derive Java requirements from installed official metadata and pass the verified game major at launch; defer Java-specific content checks until metadata exists — version-name guessing breaks modern releases — cost if wrong: a pre-game-install preview may later fail a Java compatibility check before launch.
+
+### Earlier 0.1.0 decisions retained for traceability
+
 
 The complete execution decisions, including superseded troubleshooting choices, are preserved below with their stated costs:
 
@@ -55,11 +61,3 @@ The complete execution decisions, including superseded troubleshooting choices, 
 - Final: Ruling: settings draft loss is Important rather than polish — the usual client-ID-then-browse setup sequence discards necessary configuration, so include its regression/fix in the one review fix pass — cost if wrong: small additional settings-state complexity.
 - Final: Ruling: live authorization, gameplay, and Windows execution were not judged by the reviewer — retain explicit unverified status and manual acceptance steps because no real account/Windows runtime was provided — cost if wrong: account/platform-specific issues remain.
 - Final: Ruling: reviewer did not judge generated packaging artifacts — accept only after builder exit 0, PE inspection, and Linux packaged-ASAR startup, keeping Windows execution unverified — cost if wrong: Windows-only packaging issues remain.
-
-## Artifact
-
-Portable size: 102396947 bytes.
-
-Portable SHA-256: `fac1f7e40eebe5ac19e0258ff6e147f5fcb54e10cd7a30868a314dce2bb1e452`.
-
-See `release/SHA256SUMS` for the generated portable and source archive checksums.

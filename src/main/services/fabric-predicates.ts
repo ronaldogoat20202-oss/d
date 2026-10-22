@@ -5,6 +5,7 @@ function normalized(value:string):string {
   if(!result||!valid(result))throw new Error(`Unsupported Fabric version syntax: ${value}`)
   return result
 }
+export const compareFabricVersions=(a:string,b:string)=>compare(normalized(a),normalized(b))
 export function matchesFabricVersion(version:string,predicate:string|string[]):boolean {
   if(Array.isArray(predicate)){const results=predicate.map(p=>matchesFabricVersion(version,p));return results.some(Boolean)}
   if(typeof predicate!=='string'||predicate.length>1024||!predicate.trim())throw new Error('Unsupported Fabric dependency predicate.')
