@@ -6,6 +6,9 @@ import type { SettingsStore } from './services/settings'
 import type { VersionService } from './services/versions'
 import type { InstallService } from './services/installer'
 import type { FabricService } from './services/fabric'
+import type { AddonService,ContentRequest } from './services/addons'
+import type { ModrinthCatalog } from './adapters/modrinth'
+import type { AddonKind,CatalogQuery } from '../shared/addons'
 import type { AccountService } from './services/accounts'
 import type { JavaService } from './services/java'
 import type { LogService } from './services/logs'
@@ -20,6 +23,9 @@ export interface ControllerDependencies {
   versions: Pick<VersionService, 'list'>
   installer: Pick<InstallService, 'ensure' | 'inspect'>
   fabric?: Pick<FabricService, 'listLoaders' | 'ensure' | 'inspect'>
+  addons?: AddonService
+  catalog?: ModrinthCatalog
+  pickAddon?: (kind:AddonKind)=>Promise<string|null>
   accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent' | 'index' | 'createOffline' | 'select' | 'remove' | 'cancelSignIn'>
   java: Pick<JavaService, 'verify' | 'detect'>
   logs: LogService
@@ -37,6 +43,7 @@ export class Controller {
   private editing = false
   private refreshing = false
   private accountRevision = 0
+  private profileRevision = 0
   constructor(private deps: ControllerDependencies) {}
   async initialize(): Promise<void> {
     const stored = await this.deps.settings.read()
@@ -73,6 +80,7 @@ export class Controller {
     finally { this.refreshing = false; this.emit() }
   }
   private profile() { const p = this.state.profiles.find(p => p.id === this.state.selectedProfileId); if (!p) throw new Error('Choose a game profile first.'); return p }
+  private profileChanged(){this.profileRevision++;this.deps.addons?.invalidatePlans()}
   private installer(profile: GameProfile): Pick<InstallService, 'ensure'|'inspect'> {
     if (profile.loader.kind === 'vanilla') return this.deps.installer
     const fabric = this.deps.fabric, loader = profile.loader.version
@@ -83,6 +91,7 @@ export class Controller {
     this.idle(); this.editing = true
     try {
       const p = await this.deps.profiles.select(id)
+      this.profileChanged()
       this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'unknown'
       const release = this.state.releases.find(r => r.id === p.minecraftVersion)
       if (release) this.state.profileInstallation = await this.installer(p).inspect(release,p.libraryRoot) ? 'installed' : 'missing'
@@ -100,6 +109,7 @@ export class Controller {
         loader = {kind:'fabric',version:stable.version}
       } else if (input.loader !== 'vanilla') throw new Error('Choose Vanilla or Fabric.')
       const p = await this.deps.profiles.create(input, this.state.settings.gameDirectory, loader)
+      this.profileChanged()
       this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = p.id; this.state.profileInstallation = 'missing'; this.state.error = null
       this.emit(); return this.snapshot()
     } finally { this.editing = false }
@@ -112,6 +122,7 @@ export class Controller {
     this.idle(); this.editing = true
     try {
       await this.deps.profiles.remove(id); this.state.profiles = await this.deps.profiles.list(); this.state.selectedProfileId = (await this.deps.profiles.selected())?.id || null
+      this.profileChanged()
       this.state.profileInstallation = 'unknown'; this.deps.logs.append('info','Profile removed from Orbit. Its worlds and files have been retained.'); this.emit(); return this.snapshot()
     } finally { this.editing = false }
   }
@@ -192,6 +203,7 @@ export class Controller {
     try {
       const version = await this.installer(profile).inspect(release, profile.libraryRoot)
       if (!version) { this.state.profileInstallation = 'missing'; throw new Error('Install or repair this Minecraft release before launching.') }
+      await this.deps.addons?.assertReady(profile)
       await mkdir(profile.libraryRoot, {recursive:true}); await safeDestination(profile.libraryRoot, profile.gameDirectory + '/.orbit-check'); await mkdir(profile.gameDirectory, {recursive:true})
       const session = await this.deps.accounts.session(this.state.settings.clientId)
       const assertAuthorized = () => {
@@ -218,7 +230,34 @@ export class Controller {
     } catch (e) { this.state.operation = { phase: 'idle' }; throw this.failure(e, 'LAUNCH_FAILED') }
   }
   async copyLogs(): Promise<void> { this.deps.writeClipboard?.(this.deps.logs.entries().map(line => `${new Date(line.time).toISOString()} [${line.level}] ${line.message}`).join('\n')) }
+  private addons(){if(!this.deps.addons)throw new Error('The content library is unavailable in this build.');return this.deps.addons}
+  private kind(value:unknown):asserts value is AddonKind{if(!['mod','resourcepack','datapack','shader'].includes(value as string))throw new Error('Invalid content kind.')}
+  private identifier(value:unknown):asserts value is string{if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(value))throw new Error('Invalid library identifier.')}
+  private fields(value:unknown,allowed:string[]):void{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!allowed.includes(key)))throw new Error('Invalid library request fields or arguments.')}
+  private world(value:unknown):void{if(value!==undefined&&(typeof value!=='string'||value.length>512||!value.includes(':')))throw new Error('Invalid world selection.')}
+  private async content<T>(message:string,action:(p:GameProfile,progress:(v:import('../shared/contracts').DownloadProgress)=>void)=>Promise<T>):Promise<T>{
+    this.idle();const profile=this.profile();this.state.operation={phase:'content',message,progress:null};this.state.error=null;this.emit()
+    try{return await action(profile,progress=>{this.state.operation={phase:'content',message,progress};this.emit()})}
+    catch(error){throw this.failure(error,'CONTENT_FAILED')}
+    finally{this.state.operation={phase:'idle'};this.emit()}
+  }
+  async getLibrary(){const profile=this.profile(),revision=this.profileRevision,result=await this.addons().library(profile);if(revision!==this.profileRevision)throw new Error('The game profile changed. Refresh the library.');return result}
+  async searchAddons(query:Omit<CatalogQuery,'gameVersion'>){
+    this.fields(query,['kind','query','offset','limit']);this.kind(query.kind)
+    if(!this.deps.catalog)throw new Error('Modrinth is unavailable.')
+    const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.search({...query,gameVersion:p.minecraftVersion})
+    if(revision!==this.profileRevision)throw new Error('The game profile changed. Search again.');return result
+  }
+  async addonVersions(projectId:string,kind:AddonKind){this.identifier(projectId);this.kind(kind);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.versions(projectId,{kind,gameVersion:p.minecraftVersion,loader:p.loader.kind});if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the add-on again.');return result}
+  async previewAddon(request:ContentRequest){this.fields(request,['kind','projectId','versionId','worldId']);this.kind(request.kind);if(request.projectId!==undefined)this.identifier(request.projectId);if(request.versionId!==undefined)this.identifier(request.versionId);this.world(request.worldId);return this.content('Checking compatibility and dependencies',(p)=>this.addons().plan(p,request))}
+  async installAddon(id:string){this.identifier(id);return this.content('Installing add-ons',(p,progress)=>this.addons().install(p,id,progress))}
+  async previewImport(kind:AddonKind,worldId?:string){this.kind(kind);this.world(worldId);return this.content('Inspecting local archive',async p=>{const path=await this.deps.pickAddon?.(kind);return path?this.addons().prepareImport(p,path,kind,worldId):null})}
+  async installImport(id:string,allowUnverified:boolean){this.identifier(id);if(typeof allowUnverified!=='boolean')throw new Error('Invalid import confirmation.');return this.content('Importing add-ons',(p,progress)=>this.addons().commitImport(p,id,allowUnverified,progress))}
+  async setAddonEnabled(id:string,enabled:boolean){this.identifier(id);if(typeof enabled!=='boolean')throw new Error('Invalid enabled state.');return this.content('Changing installed content',p=>this.addons().setEnabled(p,id,enabled))}
+  async removeAddon(id:string){this.identifier(id);return this.content('Removing managed add-on',p=>this.addons().remove(p,id))}
+  async updateAddon(id:string){this.identifier(id);return this.content('Updating compatible add-on',(p,progress)=>this.addons().update(p,id,progress))}
+  async repairAddons(){return this.content('Recovering interrupted changes',p=>this.addons().recover(p))}
   api(): Omit<LauncherApi, 'subscribe'> {
-    return { createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+    return { getLibrary:()=>this.getLibrary(),searchAddons:q=>this.searchAddons(q),addonVersions:(id,kind)=>this.addonVersions(id,kind),previewAddon:r=>this.previewAddon(r),installAddon:id=>this.installAddon(id),previewImport:(kind,world)=>this.previewImport(kind,world),installImport:(id,allow)=>this.installImport(id,allow),setAddonEnabled:(id,enabled)=>this.setAddonEnabled(id,enabled),removeAddon:id=>this.removeAddon(id),updateAddon:id=>this.updateAddon(id),repairAddons:()=>this.repairAddons(), createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
   }
 }

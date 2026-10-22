@@ -9,6 +9,8 @@ import { Controller } from './controller'
 import { VersionService } from './services/versions'
 import { InstallService } from './services/installer'
 import { FabricService } from './services/fabric'
+import { ModrinthCatalog } from './adapters/modrinth'
+import { AddonService } from './services/addons'
 import { JavaService } from './services/java'
 import { ProfileStore } from './services/profiles'
 import { AccountStore } from './services/account-store'
@@ -24,6 +26,7 @@ async function openWindow(): Promise<void> {
   const window = new BrowserWindow(createWindowOptions(join(__dirname, '../preload/index.cjs')))
   const renderer = new URL(process.env.ELECTRON_RENDERER_URL || pathToFileURL(join(__dirname, '../renderer/index.html')).href).href
   const directory = app.getPath('userData')
+  const catalog=new ModrinthCatalog(undefined,join(directory,'cache/modrinth'))
   const runtime = { platform: process.platform, architecture: process.arch, totalMemoryBytes: totalmem() }
   const pick = async (properties: ('openFile' | 'openDirectory' | 'createDirectory')[], title: string) => {
     const result = await dialog.showOpenDialog(window, { properties, title })
@@ -31,6 +34,8 @@ async function openWindow(): Promise<void> {
   }
   const controller = new Controller({
     profiles: new ProfileStore(directory),
+    catalog,addons:new AddonService(catalog),
+    pickAddon:async kind=>{const result=await dialog.showOpenDialog(window,{title:'Import '+kind,properties:['openFile'],filters:[{name:kind==='mod'?'Fabric mod':'Minecraft pack',extensions:[kind==='mod'?'jar':'zip']}]});return result.canceled?null:result.filePaths[0]||null},
     configuredClientId: typeof __ORBIT_MICROSOFT_CLIENT_ID__ === 'string' ? __ORBIT_MICROSOFT_CLIENT_ID__ : '',
     settings: new SettingsStore(directory, runtime), versions: new VersionService(join(directory, 'cache')),
     installer: new InstallService(), fabric: new FabricService(), java: new JavaService(), runtime, logs: new LogService(), launch: launchGame,

@@ -13,6 +13,9 @@ import { LogService } from '../../src/main/services/logs'
 import { minecraftFixture } from '../fixtures/minecraft'
 import { fabricFixture } from '../fixtures/fabric'
 import { FabricService } from '../../src/main/services/fabric'
+import { AddonService } from '../../src/main/services/addons'
+import { ModrinthCatalog } from '../../src/main/adapters/modrinth'
+import { addonFixture } from '../fixtures/addons'
 import type { JavaRuntime } from '../../src/main/services/types'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))) })
@@ -145,4 +148,23 @@ it('does not spawn after the selected offline account changes', async () => {
   await controller.createOfflineAccount('Second'); resume()
   await expect(pending).rejects.toThrow(/account|cancel/i)
   expect(spawns).toBe(0)
+})
+it('derives add-on targets in main, rejects caller paths, and serializes content with profile changes',async()=>{
+  const {controller:c,deps}=await setup(),f=addonFixture()
+  deps.addons=new AddonService(new ModrinthCatalog(f.fetcher),undefined,undefined,undefined,f.fetcher);deps.catalog=new ModrinthCatalog(f.fetcher)
+  await expect(c.previewAddon({kind:'mod',projectId:'main',path:'/evil'} as never)).rejects.toThrow(/argument|field|request/i)
+  deps.pickAddon=async()=>null
+  expect(await c.previewImport('resourcepack')).toBeNull()
+  let resume!:()=>void
+  deps.addons.plan=async()=>new Promise(resolve=>{resume=()=>resolve({id:'a'.repeat(36),profileId:'test',entries:[],optionalDependencies:[]})})
+  const pending=c.previewAddon({kind:'resourcepack',projectId:'main'})
+  await vi.waitFor(()=>expect(resume).toBeDefined())
+  await expect(c.createProfile({name:'Other',minecraftVersion:'fixture',loader:'vanilla'})).rejects.toThrow(/progress|busy/i)
+  await expect(c.launch()).rejects.toThrow(/progress|busy/i);resume();await pending
+})
+it('checks add-on recovery before the actual game process is started',async()=>{
+  const {controller:c,deps}=await setup();await c.install();await c.createOfflineAccount('Builder');await c.saveSettings({javaPath:'/java21'})
+  const f=addonFixture();deps.addons=new AddonService(new ModrinthCatalog(f.fetcher),undefined,undefined,undefined,f.fetcher)
+  vi.spyOn(deps.addons,'assertReady').mockRejectedValue(new Error('Recover interrupted add-ons.'))
+  await expect(c.launch()).rejects.toThrow(/recover/i);expect(deps.launch).not.toHaveBeenCalled()
 })

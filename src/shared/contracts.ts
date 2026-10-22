@@ -1,6 +1,7 @@
 import type { GameProfile, NewProfile } from './profiles'
 export type { GameProfile, Loader, NewProfile } from './profiles'
 import type { AccountIdentity, AccountKind } from './accounts'
+import type { AddonKind,AddonPlan,CatalogQuery,CatalogVersion,ImportPreview,LibraryState,SearchPage } from './addons'
 export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
   clientId: string
@@ -20,6 +21,7 @@ export type Operation =
   | { phase: 'idle' }
   | { phase: 'installing'; versionId: string; progress: DownloadProgress }
   | { phase: 'launching' | 'running'; versionId: string }
+  | { phase:'content'; message:string; progress:DownloadProgress|null }
 export interface PublicError { code: string; message: string }
 export interface LogEntry { time: number; level: 'info' | 'error'; message: string }
 export interface Snapshot {
@@ -37,6 +39,17 @@ export interface Snapshot {
   offline: boolean
 }
 export interface LauncherApi {
+  getLibrary():Promise<LibraryState>
+  searchAddons(query:Omit<CatalogQuery,'gameVersion'>):Promise<SearchPage>
+  addonVersions(projectId:string,kind:AddonKind):Promise<CatalogVersion[]>
+  previewAddon(request:{kind:AddonKind;projectId?:string;versionId?:string;worldId?:string}):Promise<AddonPlan>
+  installAddon(planId:string):Promise<void>
+  previewImport(kind:AddonKind,worldId?:string):Promise<ImportPreview|null>
+  installImport(previewId:string,allowUnverified:boolean):Promise<void>
+  setAddonEnabled(id:string,enabled:boolean):Promise<void>
+  removeAddon(id:string):Promise<void>
+  updateAddon(id:string):Promise<void>
+  repairAddons():Promise<void>
   getSnapshot(): Promise<Snapshot>
   refreshVersions(): Promise<void>
   saveSettings(patch: Partial<Settings>): Promise<Snapshot>

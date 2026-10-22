@@ -26,6 +26,7 @@ export class AddonService {
   private plans=new Map<string,Prepared>()
   private previews=new Map<string,PreparedImport>()
   private locked=new Set<string>()
+  invalidatePlans():void{this.plans.clear();this.previews.clear()}
   constructor(private catalog=new ModrinthCatalog(),private dependencies=resolveAddons,private imports=importsDefault,private worlds=worldsDefault,private fetcher:FetchPort=networkFetch,private transactions=new AddonTransactions()){}
   private async lock<T>(p:GameProfile,action:()=>Promise<T>):Promise<T>{if(this.locked.has(p.gameDirectory))throw new Error('Another add-on operation is in progress.');this.locked.add(p.gameDirectory);try{return await action()}finally{this.locked.delete(p.gameDirectory)}}
   private remember<T>(map:Map<string,T>,id:string,value:T){if(map.size>=20)map.delete(map.keys().next().value!);map.set(id,value)}
