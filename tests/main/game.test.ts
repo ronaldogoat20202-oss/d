@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateArguments } from '@xmcl/core'
-import { minecraftFixture } from '../fixtures/minecraft'
+import { minecraftFixture,hash } from '../fixtures/minecraft'
 import { InstallService } from '../../src/main/services/installer'
 import { makeLaunchOptions, guardSpawn } from '../../src/main/adapters/minecraft-launcher'
 import { launchGame } from '../../src/main/services/game'
@@ -55,4 +55,16 @@ it('rechecks authorization after asynchronous core prechecks before spawning Jav
   authorized = false; resume()
   await expect(pending).rejects.toThrow(/could not start/i)
   expect(spawn).not.toHaveBeenCalled()
+})
+it.each([false,true])('joins saved servers with safe legacy or Quick Play arguments (modern=%s)',async modern=>{
+  const root=await mkdtemp(join(tmpdir(),'orbit-server-launch-'));roots.push(root)
+  const f=minecraftFixture(),platform={name:'windows' as const,arch:'x64',version:'10.0.0'}
+  if(modern){const raw=JSON.parse(Buffer.from(f.files.get(f.release.url)!).toString('utf8'));raw.arguments.game.push({rules:[{action:'allow',features:{is_quick_play_multiplayer:true}}],value:['--quickPlayMultiplayer','${quickPlayMultiplayer}']});const bytes=Buffer.from(JSON.stringify(raw));f.files.set(f.release.url,bytes);f.release.sha1=hash(bytes)}
+  const installed=await new InstallService(f.fetcher,platform).ensure(f.release,root,()=>{})
+  const options=await makeLaunchOptions({settings:{clientId:'',javaPath:'/java',gameDirectory:root,maxMemoryMiB:2048},version:installed,session:{kind:'offline',profile:{kind:'offline',id:'a'.repeat(32),name:'Builder'}},server:{host:'example.org',port:25566,address:'example.org:25566'}},platform)
+  const args=await generateArguments(options)
+  expect(args.filter(a=>a===(modern?'--quickPlayMultiplayer':'--server'))).toHaveLength(1)
+  expect(args).toContain(modern?'example.org:25566':'example.org')
+  if(!modern)expect(args.slice(args.indexOf('--port'),args.indexOf('--port')+2)).toEqual(['--port','25566'])
+  expect(args.join(' ')).not.toContain('${');expect(args).not.toContain(modern?'--server':'--quickPlayMultiplayer')
 })

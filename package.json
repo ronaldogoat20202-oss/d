@@ -1,6 +1,6 @@
 {
   "name": "orbit-launcher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A custom desktop launcher for Minecraft Java Edition",
   "author": "Orbit Launcher contributors",

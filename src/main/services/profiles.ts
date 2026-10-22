@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, resolve } from 'node:path'
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { GameProfile, Loader, NewProfile } from '../../shared/profiles'
 import { assertVersionId } from './network'
 import { safeDestination } from './downloads'
@@ -57,17 +57,19 @@ export class ProfileStore {
       s.profiles.push(p); s.selected = p.id; s.migrated = true; return p
     })
   }
-  create(input: NewProfile, libraryRoot: string, loader: Loader): Promise<GameProfile> {
+  create(input: NewProfile, libraryRoot: string, loader: Loader, prepare?:(profile:GameProfile)=>Promise<void>): Promise<GameProfile> {
+    let generated:string|null=null
     return this.mutate(async s => {
       if (!input || !isAbsolute(libraryRoot)) throw new Error('Choose an absolute game library.')
       const label = name(input.name); assertVersionId(input.minecraftVersion)
       if (!loader || !['vanilla', 'fabric'].includes(loader.kind) || input.loader !== loader.kind) throw new Error('Choose a supported loader.')
       if (loader.kind === 'fabric') assertVersionId(loader.version)
       const id = randomUUID(), root = resolve(libraryRoot), gameDirectory = join(root, 'instances', id)
-      await mkdir(root, { recursive: true }); await safeDestination(root, gameDirectory); await mkdir(gameDirectory, { recursive: true })
+      await mkdir(root, { recursive: true }); await safeDestination(root, gameDirectory); await mkdir(dirname(gameDirectory),{recursive:true});await mkdir(gameDirectory);generated=gameDirectory
       const p: GameProfile = { id, name: label, minecraftVersion: input.minecraftVersion, loader, libraryRoot: root, gameDirectory, legacy: false }
+      await prepare?.(structuredClone(p))
       s.profiles.push(p); s.selected = id; return p
-    })
+    }).catch(async error=>{if(generated){await safeDestination(libraryRoot,generated);await rm(generated,{recursive:true,force:true})}throw error})
   }
   select(id: string): Promise<GameProfile> { return this.mutate(s => { const p = s.profiles.find(p => p.id === id); if (!p) throw new Error('Select an available game profile.'); s.selected = id; return p }) }
   rename(id: string, value: string): Promise<void> { return this.mutate(s => { const p = s.profiles.find(p => p.id === id); if (!p) throw new Error('Select an available game profile.'); p.name = name(value) }) }

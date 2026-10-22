@@ -13,6 +13,7 @@ import { LogService } from '../../src/main/services/logs'
 import { minecraftFixture } from '../fixtures/minecraft'
 import { fabricFixture } from '../fixtures/fabric'
 import { FabricService } from '../../src/main/services/fabric'
+import { ServerStore } from '../../src/main/services/servers'
 import { AddonService } from '../../src/main/services/addons'
 import { ModrinthCatalog } from '../../src/main/adapters/modrinth'
 import { addonFixture } from '../fixtures/addons'
@@ -167,4 +168,23 @@ it('checks add-on recovery before the actual game process is started',async()=>{
   const f=addonFixture();deps.addons=new AddonService(new ModrinthCatalog(f.fetcher),undefined,undefined,undefined,f.fetcher)
   vi.spyOn(deps.addons,'assertReady').mockRejectedValue(new Error('Recover interrupted add-ons.'))
   await expect(c.launch()).rejects.toThrow(/recover/i);expect(deps.launch).not.toHaveBeenCalled()
+})
+
+it('joins only a main-owned saved server through the existing launch prerequisites',async()=>{
+  const {controller,deps}=await setup(),directory=await mkdtemp(join(tmpdir(),'orbit-controller-servers-'));roots.push(directory);deps.servers=new ServerStore(directory)
+  const saved=await controller.saveServer({name:'Friends',address:'EXAMPLE.org:25566'})
+  await expect(controller.joinServer('missing')).rejects.toThrow(/server/i)
+  await expect(controller.joinServer(saved.id)).rejects.toThrow(/install|repair/i)
+  await controller.install();await controller.createOfflineAccount('Builder');await controller.saveSettings({javaPath:'/java21'})
+  await controller.joinServer(saved.id)
+  expect(vi.mocked(deps.launch).mock.calls[0][0].server).toEqual({host:'example.org',port:25566,address:'example.org:25566'})
+  await expect(controller.joinServer(saved.id)).rejects.toThrow(/running|progress/i)
+  await expect(controller.removeServer(saved.id)).rejects.toThrow(/running|progress/i)
+})
+it('checks project link and new IPC request fields in main',async()=>{
+  const {controller,deps}=await setup();deps.openProjectLink=vi.fn(async()=>{})
+  for(const url of ['javascript:alert(1)','https://127.0.0.1/','file:///etc/passwd','https://user:pass@example.org','https://localhost/'])await expect(controller.openProjectLink(url)).rejects.toThrow(/HTTPS|link/i)
+  await controller.openProjectLink('https://fabricmc.net/wiki/')
+  expect(deps.openProjectLink).toHaveBeenCalledWith('https://fabricmc.net/wiki/')
+  await expect(controller.searchAddons({kind:'mod',query:'',offset:0,limit:20,extra:'bad'} as never)).rejects.toThrow(/field|argument/i)
 })

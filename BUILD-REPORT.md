@@ -1,3 +1,26 @@
+# Orbit Launcher 0.3.0 Library browser verification
+
+Date: 2026-10-22. Native implementation in the existing `/workspace/d`, branch `work`, baseline `0e35526829b7a09a9b19c06795b7fc487f8c5f05`. The earlier report below records 0.2.0 only.
+
+The Library now has six functional tabs, full-width project rows with real metadata, provider-backed sorting/page sizes/pagination, and full safe-Markdown Description/Versions pages. Installation keeps compatibility/dependency previews and stale-response guards. Images are restricted to Modrinth CDN; links open public HTTPS destinations in the system browser on explicit click. Renderer navigation and Electron sandbox policies remain in place.
+
+Modpacks preview and verify `.mrpack` archives, create separate exact-version Vanilla/Fabric profiles, and register top-level pack add-ons as managed Modpack content. Failed preparation/publication cleans only the newly generated instance and preserves prior selection. Client overrides replace general overrides. Optional/server-only downloads are skipped visibly. Bounds: 512 MiB per archive/file, 4 MiB index, 5,000 downloads, 10,000 ZIP entries, 4 GiB installed/expanded content. Required file hosts are direct Modrinth CDN only; Forge/NeoForge/Quilt and other required hosts are rejected before installation. Modpacks can provide settings/overrides inside their new profile.
+
+Saved server CRUD is atomic and local. Join resolves a saved main-process address and retains normal installation/account/Java/operation checks. Quick Play detection uses resolved Minecraft arguments; legacy versions receive server/port arguments without shell execution. No server availability or successful connection is fabricated.
+
+## 0.3.0 verification evidence
+
+- Type checking and production build: exit 0. Full suite: **210 passed, 1 opt-in live test skipped** across33 files. Browser flows: **7 passed**, including six-tab catalog/detail/back/sort/page-size, separate modpack profile creation, server save/edit/join, and minimum900×650 layout.
+- Production Electron with its real preload/IPC and isolated `/tmp` userData loaded19,690 live compatible mods and the full Fabric API description with36 versions. All six tabs, catalog/details at1280/900, and server create/edit/remove including IPv6 fit without horizontal overflow. Join was not used to start Minecraft.
+- A real Fabulously Optimized6.5.0 package (`N276l2ON`) previewed113 files and44,322,932 download bytes, then installed in a separate MC1.21.1/Fabric0.19.3 profile. Library returned51 enabled managed entries (48mods,3resourcepacks); each installed managed file matched its SHA-512. Original Fabric0.19.5 profile/files stayed intact. Final operation idle/error=null; temporary game/userData removed.
+- The live pack exposed a valid auxiliary cosign ZIP alongside its primary mrpack. A regression failed before the parser fix and passed after selecting/validating the declared primary file. Size/hash/host checks remain enforced on the installed artifact; ambiguous primary selection is rejected.
+- Chromium image requests encountered the cloud environment's certificate-authority error; the intended fallback icons rendered. Main-process API/download TLS verification passed. No TLS checks were disabled. Native image rendering on the user's Windows trust store remains manual.
+- Review and exact Windows CI artifact details follow after final review/build completion.
+
+ Real Microsoft login, actual Minecraft gameplay/shader rendering, and execution on a user's Windows machine still require manual acceptance. No registered Orbit Microsoft client ID has been supplied.
+
+## Earlier 0.2.0 report
+
 # Orbit Launcher 0.2.0 verification report
 
 Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review, its regression-tested fix pass, and Windows CI delivery are complete. Built application/test commit: `afed5731dc633a41d96fd57e2c547b4921194b5a`.

@@ -7,6 +7,9 @@ import type { VersionService } from './services/versions'
 import type { InstallService } from './services/installer'
 import type { FabricService } from './services/fabric'
 import type { AddonService,ContentRequest } from './services/addons'
+import { parseServerAddress,type ServerStore } from './services/servers'
+import type { ServerAddress,ServerInput } from '../shared/servers'
+import type { ModpackService } from './services/modpacks'
 import type { ModrinthCatalog } from './adapters/modrinth'
 import type { AddonKind,CatalogKind,CatalogQuery } from '../shared/addons'
 import type { AccountService } from './services/accounts'
@@ -26,6 +29,8 @@ export interface ControllerDependencies {
   fabric?: Pick<FabricService, 'listLoaders' | 'ensure' | 'inspect'>
   addons?: AddonService
   catalog?: ModrinthCatalog
+  modpacks?: ModpackService
+  servers?: ServerStore
   pickAddon?: (kind:AddonKind)=>Promise<string|null>
   accounts: Pick<AccountService, 'current' | 'signIn' | 'signOut' | 'session' | 'isPersistent' | 'index' | 'createOffline' | 'select' | 'remove' | 'cancelSignIn'>
   java: Pick<JavaService, 'verify' | 'detect'>
@@ -82,7 +87,7 @@ export class Controller {
     finally { this.refreshing = false; this.emit() }
   }
   private profile() { const p = this.state.profiles.find(p => p.id === this.state.selectedProfileId); if (!p) throw new Error('Choose a game profile first.'); return p }
-  private profileChanged(){this.profileRevision++;this.deps.addons?.invalidatePlans()}
+  private profileChanged(){this.profileRevision++;this.deps.addons?.invalidatePlans();this.deps.modpacks?.invalidatePlans()}
   private installer(profile: GameProfile): Pick<InstallService, 'ensure'|'inspect'> {
     if (profile.loader.kind === 'vanilla') return this.deps.installer
     const fabric = this.deps.fabric, loader = profile.loader.version
@@ -135,6 +140,7 @@ export class Controller {
       const saved = await this.deps.settings.update(patch)
       const settings = { ...saved, clientId: resolveClientId(this.deps.configuredClientId || '', saved.clientId) || '' }
       if (settings.clientId !== previous.clientId) { this.accountRevision++; this.authRequest?.abort(); await this.deps.accounts.signOut(); this.state.account = { status: 'signedOut' } }
+      if(settings.gameDirectory!==previous.gameDirectory)this.deps.modpacks?.invalidatePlans()
       this.state.settings = settings; this.state.microsoftConfigured = !!settings.clientId; this.state.error = null; this.emit(); return this.snapshot()
     } catch (e) { throw this.failure(e, 'SETTINGS_INVALID') } finally { this.editing = false }
   }
@@ -163,7 +169,7 @@ export class Controller {
     const revision = this.accountRevision
     try { const session = await this.deps.accounts.session(this.state.settings.clientId); if (revision !== this.accountRevision || this.deps.accounts.current()?.id !== session.profile.id) return; this.state.account = { status: 'signedIn', profile: session.profile, persistent: this.deps.accounts.isPersistent() }; this.emit() } catch { /* sign-in remains available */ }
   }
-  shutdown(): void { this.accountRevision++; this.authRequest?.abort(); this.listeners.clear() }
+  shutdown(): void { this.deps.modpacks?.invalidatePlans();this.accountRevision++; this.authRequest?.abort(); this.listeners.clear() }
   async createOfflineAccount(name: string): Promise<Snapshot> {
     this.accountRevision++; this.authRequest?.abort()
     const profile = await this.deps.accounts.createOffline(name)
@@ -197,7 +203,7 @@ export class Controller {
     } catch (e) { this.state.profileInstallation = 'missing'; throw this.failure(e, 'INSTALL_FAILED') }
     finally { this.state.operation = { phase: 'idle' }; this.emit() }
   }
-  async launch(): Promise<void> {
+  async launch(server?:ServerAddress): Promise<void> {
     this.idle(); const profile = this.profile(), release = this.release()
     const revision = this.accountRevision
     this.state.operation = { phase: 'launching', versionId: release.id }; this.state.error = null; this.emit()
@@ -224,7 +230,7 @@ export class Controller {
       if (this.deps.runtime.architecture !== 'x64' || this.state.settings.maxMemoryMiB < 1024 || this.state.settings.maxMemoryMiB > cap) throw new Error('Check x64 Java and memory allocation in Settings before launching.')
       if (session.kind === 'microsoft') this.deps.logs.registerSecret(session.accessToken)
       assertAuthorized()
-      await this.deps.launch({ gameDirectory: profile.gameDirectory, settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
+      await this.deps.launch({ server,gameDirectory: profile.gameDirectory, settings: { ...this.state.settings, javaPath }, version, session, assertAuthorized,
         onLog: text => { this.deps.logs.append('info', text); this.emit() },
         onExit: code => { if (exited) return; exited = true; this.state.operation = { phase: 'idle' }; this.deps.logs.append(code === 0 ? 'info' : 'error', `Minecraft exited with ${code === null ? 'an interruption' : `code ${code}`}.`); if (code !== 0) this.state.error = { code: 'GAME_EXIT', message: `Minecraft stopped with exit code ${code ?? 'unknown'}. Check Logs and Java settings.` }; this.emit() }
       })
@@ -243,6 +249,11 @@ export class Controller {
     catch(error){throw this.failure(error,'CONTENT_FAILED')}
     finally{this.state.operation={phase:'idle'};this.emit()}
   }
+  private serverStore(){if(!this.deps.servers)throw new Error('Saved servers are unavailable.');return this.deps.servers}
+  async getServers(){return this.serverStore().list()}
+  async saveServer(input:ServerInput){this.idle();this.editing=true;try{this.fields(input,['id','name','address']);return await this.serverStore().save(input)}finally{this.editing=false}}
+  async removeServer(id:string){this.idle();this.editing=true;try{this.identifier(id);await this.serverStore().remove(id)}finally{this.editing=false}}
+  async joinServer(id:string){this.idle();this.identifier(id);const revision=this.profileRevision;this.profile();const saved=(await this.serverStore().list()).find(s=>s.id===id);if(!saved)throw new Error('Choose a saved server.');if(revision!==this.profileRevision)throw new Error('The game profile changed. Join the server again.');await this.launch(parseServerAddress(saved.address))}
   async getLibrary(){const profile=this.profile(),revision=this.profileRevision,result=await this.addons().library(profile);if(revision!==this.profileRevision)throw new Error('The game profile changed. Refresh the library.');return result}
   async searchAddons(query:Omit<CatalogQuery,'gameVersion'>){
     this.fields(query,['kind','query','offset','limit','sort']);this.catalogKind(query.kind)
@@ -251,6 +262,10 @@ export class Controller {
     if(revision!==this.profileRevision)throw new Error('The game profile changed. Search again.');return result
   }
   private catalogKind(value:unknown):asserts value is CatalogKind{if(!['mod','resourcepack','datapack','shader','modpack'].includes(value as string))throw new Error('Invalid catalog kind.')}
+  async modpackVersions(projectId:string){this.identifier(projectId);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.modpackVersions(projectId,p.minecraftVersion);if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the modpack again.');return result}
+  private packContext(p:GameProfile){return {profileId:p.id,libraryRoot:this.state.settings.gameDirectory,gameVersion:p.minecraftVersion}}
+  async previewModpack(versionId:string){this.identifier(versionId);return this.content('Checking modpack archive',(p,progress)=>{if(!this.deps.modpacks)throw new Error('Modpacks are unavailable.');return this.deps.modpacks.preview(versionId,this.packContext(p),progress)})}
+  async installModpack(id:string){this.identifier(id);await this.content('Creating modpack profile',async(p,progress)=>{if(!this.deps.modpacks)throw new Error('Modpacks are unavailable.');const created=await this.deps.modpacks.install(id,this.packContext(p),this.deps.profiles,progress);this.profileChanged();this.state.profiles=await this.deps.profiles.list();this.state.selectedProfileId=created.id;this.state.profileInstallation='missing';this.deps.logs.append('info','Modpack profile created. Install Minecraft on Play before its first launch.');this.emit()});return this.snapshot()}
   async addonDetails(projectId:string,kind:CatalogKind){this.identifier(projectId);this.catalogKind(kind);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const revision=this.profileRevision;const result=await this.deps.catalog.project(projectId,kind);if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the project again.');return result}
   async openProjectLink(url:string){const safe=publicProjectLink(url);if(!safe||!this.deps.openProjectLink)throw new Error('This project link cannot be opened. Only public HTTPS websites are supported.');await this.deps.openProjectLink(safe)}
   async addonVersions(projectId:string,kind:AddonKind){this.identifier(projectId);this.kind(kind);if(!this.deps.catalog)throw new Error('Modrinth is unavailable.');const p=this.profile(),revision=this.profileRevision,result=await this.deps.catalog.versions(projectId,{kind,gameVersion:p.minecraftVersion,loader:p.loader.kind});if(revision!==this.profileRevision)throw new Error('The game profile changed. Choose the add-on again.');return result}
@@ -263,6 +278,6 @@ export class Controller {
   async updateAddon(id:string){this.identifier(id);return this.content('Updating compatible add-on',(p,progress)=>this.addons().update(p,id,progress))}
   async repairAddons(){return this.content('Recovering interrupted changes',p=>this.addons().recover(p))}
   api(): Omit<LauncherApi, 'subscribe'> {
-    return { addonDetails:(id,kind)=>this.addonDetails(id,kind),openProjectLink:url=>this.openProjectLink(url),getLibrary:()=>this.getLibrary(),searchAddons:q=>this.searchAddons(q),addonVersions:(id,kind)=>this.addonVersions(id,kind),previewAddon:r=>this.previewAddon(r),installAddon:id=>this.installAddon(id),previewImport:(kind,world)=>this.previewImport(kind,world),installImport:(id,allow)=>this.installImport(id,allow),setAddonEnabled:(id,enabled)=>this.setAddonEnabled(id,enabled),removeAddon:id=>this.removeAddon(id),updateAddon:id=>this.updateAddon(id),repairAddons:()=>this.repairAddons(), createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
+    return { getServers:()=>this.getServers(),saveServer:input=>this.saveServer(input),removeServer:id=>this.removeServer(id),joinServer:id=>this.joinServer(id),modpackVersions:id=>this.modpackVersions(id),previewModpack:id=>this.previewModpack(id),installModpack:id=>this.installModpack(id),addonDetails:(id,kind)=>this.addonDetails(id,kind),openProjectLink:url=>this.openProjectLink(url),getLibrary:()=>this.getLibrary(),searchAddons:q=>this.searchAddons(q),addonVersions:(id,kind)=>this.addonVersions(id,kind),previewAddon:r=>this.previewAddon(r),installAddon:id=>this.installAddon(id),previewImport:(kind,world)=>this.previewImport(kind,world),installImport:(id,allow)=>this.installImport(id,allow),setAddonEnabled:(id,enabled)=>this.setAddonEnabled(id,enabled),removeAddon:id=>this.removeAddon(id),updateAddon:id=>this.updateAddon(id),repairAddons:()=>this.repairAddons(), createOfflineAccount: name => this.createOfflineAccount(name), selectAccount: (kind,id) => this.selectAccount(kind,id), removeAccount: (kind,id) => this.removeAccount(kind,id), getSnapshot: () => this.snapshot(), saveSettings: patch => this.saveSettings(patch), createProfile: input => this.createProfile(input), selectProfile: id => this.selectProfile(id), renameProfile: (id,name) => this.renameProfile(id,name), removeProfile: id => this.removeProfile(id), signIn: () => this.signIn(), cancelSignIn: () => this.cancelSignIn(), signOut: () => this.signOut(), chooseJava: () => this.chooseJava(), chooseGameDirectory: () => this.chooseGameDirectory(), install: () => this.install(), launch: () => this.launch(), copyLogs: () => this.copyLogs(), refreshVersions: () => this.refreshVersions() }
   }
 }

@@ -1,9 +1,11 @@
 import { getPlatform, Version, type LaunchOption, type Platform } from '@xmcl/core'
 import type { SpawnOptions } from 'node:child_process'
+import type { ServerAddress } from '../../shared/servers'
+import { parseServerAddress } from '../services/servers'
 import type { Settings } from '../../shared/contracts'
 import type { GameSession, InstalledVersion } from '../services/types'
 
-export interface LaunchConfiguration { gameDirectory?: string; settings: Settings; version: InstalledVersion; session: GameSession }
+export interface LaunchConfiguration { gameDirectory?: string; server?:ServerAddress; settings: Settings; version: InstalledVersion; session: GameSession }
 export function guardSpawn(executable: string, args: readonly string[], options: SpawnOptions): void {
   if (options.shell) throw new Error('Shell execution is disabled for Minecraft.')
   if (!executable || executable.includes('\0') || args.some(arg => typeof arg !== 'string' || arg.includes('\0') || /\$\{[^}]+\}/.test(arg))) throw new Error('Unresolved or invalid Minecraft launch arguments.')
@@ -21,7 +23,10 @@ export async function makeLaunchOptions(input: LaunchConfiguration, platform: Pl
     })
     resolved.arguments.game = strip(resolved.arguments.game)
   }
+  const server=input.server?parseServerAddress(input.server.address):null
+  const quickPlay=resolved.arguments.game.some(arg=>typeof arg==='string'?arg==='--quickPlayMultiplayer':(Array.isArray(arg.value)?arg.value:[arg.value]).includes('--quickPlayMultiplayer'))
   return {
+    ...(server?(quickPlay?{quickPlayMultiplayer:server.address}:{server:{ip:server.host,...(server.port===undefined?{}:{port:server.port})}}):{}),
     gamePath: input.gameDirectory || settings.gameDirectory, resourcePath: version.root, version: resolved, javaPath: settings.javaPath,
     gameProfile: session.profile, accessToken: session.kind === 'microsoft' ? session.accessToken : '0', userType: session.kind === 'microsoft' ? undefined : 'legacy', minMemory: 512, maxMemory: settings.maxMemoryMiB,
     launcherName: 'Orbit', launcherBrand: 'Orbit', platform,

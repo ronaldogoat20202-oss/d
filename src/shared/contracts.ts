@@ -1,7 +1,9 @@
+import type { SavedServer,ServerInput } from './servers'
+import type { ModpackPreview } from './modpacks'
 import type { GameProfile, NewProfile } from './profiles'
 export type { GameProfile, Loader, NewProfile } from './profiles'
 import type { AccountIdentity, AccountKind } from './accounts'
-import type { AddonKind,AddonPlan,CatalogKind,CatalogProjectDetails,CatalogQuery,CatalogVersion,ImportPreview,LibraryState,SearchPage } from './addons'
+import type { AddonKind,AddonPlan,CatalogKind,CatalogProjectDetails,CatalogQuery,CatalogVersion,ModpackVersion,ImportPreview,LibraryState,SearchPage } from './addons'
 export type { AccountIdentity, AccountIndex, AccountKind } from './accounts'
 export interface Settings {
   clientId: string
@@ -39,8 +41,15 @@ export interface Snapshot {
   offline: boolean
 }
 export interface LauncherApi {
+  getServers():Promise<SavedServer[]>
+  saveServer(input:ServerInput):Promise<SavedServer>
+  removeServer(id:string):Promise<void>
+  joinServer(id:string):Promise<void>
   getLibrary():Promise<LibraryState>
   searchAddons(query:Omit<CatalogQuery,'gameVersion'>):Promise<SearchPage>
+  modpackVersions(projectId:string):Promise<ModpackVersion[]>
+  previewModpack(versionId:string):Promise<ModpackPreview>
+  installModpack(previewId:string):Promise<Snapshot>
   addonDetails(projectId:string,kind:CatalogKind):Promise<CatalogProjectDetails>
   openProjectLink(url:string):Promise<void>
   addonVersions(projectId:string,kind:AddonKind):Promise<CatalogVersion[]>

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir,readFile,readdir,rename,rm,stat,writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { AddonKind,AddonTarget,CatalogKind,CatalogDependency,CatalogFile,CatalogProject,CatalogProjectDetails,CatalogQuery,CatalogVersion,SearchPage } from '../../shared/addons'
+import type { AddonKind,AddonTarget,CatalogKind,CatalogDependency,CatalogFile,CatalogProject,CatalogProjectDetails,CatalogQuery,CatalogVersion,ModpackVersion,ProjectVersion,SearchPage } from '../../shared/addons'
 import { projectImage } from '../../shared/project-links'
 import { assertModrinthUrl,assertVersionId,boundedText,networkFetch,type FetchPort } from '../services/network'
 const kinds:AddonKind[]=['mod','resourcepack','datapack','shader']
@@ -17,18 +17,21 @@ function project(v:any,kind?:CatalogKind,detail=false):CatalogProject {
   const categories=Array.isArray(v.display_categories??v.categories)?(v.display_categories??v.categories).slice(0,30).map((s:unknown)=>plain(s,80)):[]
   return {id:id(v.project_id||v.id),name:plain(v.title,256),description:plain(v.description),kind:kind||([...kinds,'modpack'].includes(v.project_type)?v.project_type:'mod'),author:typeof v.author==='string'?plain(v.author,128):undefined,iconUrl:projectImage(v.icon_url),downloads:count(v.downloads),followers:count(detail?v.followers:v.follows??v.followers),updatedAt:typeof date==='string'&&Number.isFinite(Date.parse(date))?date:undefined,categories:[...new Set<string>([...categories,...(Array.isArray(v.loaders)?v.loaders.slice(0,30).map((s:unknown)=>plain(s,80)):[])])],clientSide:['required','optional','unsupported'].includes(v.client_side)?v.client_side:undefined,serverSide:['required','optional','unsupported'].includes(v.server_side)?v.server_side:undefined}
 }
-function version(v:any,kind?:AddonKind):CatalogVersion {
+function version(v:any,kind?:AddonKind):CatalogVersion
+function version(v:any,kind:'modpack'):ModpackVersion
+function version(v:any,kind?:CatalogKind):ProjectVersion {
   if(!v||!Array.isArray(v.game_versions)||v.game_versions.length>2000||!Array.isArray(v.loaders)||v.loaders.length>100||!Array.isArray(v.files)||v.files.length>100||!Array.isArray(v.dependencies)||v.dependencies.length>500||!Number.isFinite(Date.parse(v.date_published)))throw new Error('Invalid Modrinth version metadata.')
   const loaders=v.loaders.map((s:unknown)=>plain(s,80)),gameVersions=v.game_versions.map((s:unknown)=>plain(s,101))
-  const files:CatalogFile[]=v.files.map((f:any)=>{
-    if(!f||typeof f.filename!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._+() -]{0,199}\.(?:jar|zip)$/.test(f.filename)||!Number.isSafeInteger(f.size)||f.size<=0||f.size>512*1024**2||!/^[a-f0-9]{128}$/i.test(f.hashes?.sha512))throw new Error('Invalid add-on file name, size or checksum.')
+  const primary=v.files.filter((f:any)=>f?.primary===true)
+  if(primary.length>1||!v.files.length||(primary.length===0&&v.files.length!==1))throw new Error('Ambiguous Modrinth primary file.')
+  // Auxiliary signatures and other attachments are never installed. Validate
+  // the single selected artifact against the requested content format.
+  const files:CatalogFile[]=(primary.length?primary:v.files).map((f:any)=>{
+    if(!f||typeof f.filename!=='string'||!(kind==='modpack'?/^[A-Za-z0-9][A-Za-z0-9._+() -]{0,199}\.mrpack$/:/^[A-Za-z0-9][A-Za-z0-9._+() -]{0,199}\.(?:jar|zip)$/).test(f.filename)||!Number.isSafeInteger(f.size)||f.size<=0||f.size>512*1024**2||!/^[a-f0-9]{128}$/i.test(f.hashes?.sha512))throw new Error('Invalid add-on file name, size or checksum.')
     assertModrinthUrl(f.url);return {filename:f.filename,url:f.url,size:f.size,sha512:f.hashes.sha512.toLowerCase(),primary:f.primary===true}
   })
-  const primary=files.filter(f=>f.primary)
-  if(primary.length>1||!files.length||(primary.length===0&&files.length!==1))throw new Error('Ambiguous Modrinth primary file.')
-  const selected=primary.length?primary:files
   const dependencies:CatalogDependency[]=v.dependencies.map((d:any)=>{if(!['required','optional','incompatible','embedded'].includes(d?.dependency_type))throw new Error('Invalid add-on dependency.');return {type:d.dependency_type,projectId:d.project_id?id(d.project_id):null,versionId:d.version_id?id(d.version_id):null}})
-  return {id:id(v.id),projectId:id(v.project_id),name:plain(v.name,256),kind:kind||inferKind(loaders),gameVersions,loaders,files:selected,dependencies,publishedAt:v.date_published}
+  return {id:id(v.id),projectId:id(v.project_id),name:plain(v.name,256),kind:kind||inferKind(loaders),gameVersions,loaders,files,dependencies,publishedAt:v.date_published}
 }
 export class ModrinthCatalog {
   constructor(private fetcher:FetchPort=networkFetch,private cacheDirectory?:string){}
@@ -66,6 +69,13 @@ export class ModrinthCatalog {
     return result.value.filter(v=>v.projectId===projectId&&compatible(v,target)).sort((a,b)=>Date.parse(b.publishedAt)-Date.parse(a.publishedAt)||a.id.localeCompare(b.id))
   }
   async version(versionId:string):Promise<CatalogVersion>{const v=(await this.request('/version/'+id(versionId),v=>version(v))).value;if(v.id!==versionId)throw new Error('Unexpected Modrinth version identity.');return v}
+  async modpackVersion(versionId:string):Promise<ModpackVersion>{const v=(await this.request('/version/'+id(versionId),v=>version(v,'modpack'))).value;if(v.id!==versionId)throw new Error('Unexpected Modrinth version identity.');return v}
+  async modpackVersions(projectId:string,gameVersion:string):Promise<ModpackVersion[]>{
+    assertVersionId(gameVersion)
+    const params=new URLSearchParams({game_versions:JSON.stringify([gameVersion])})
+    const result=await this.request('/project/'+id(projectId)+'/version?'+params,v=>{if(!Array.isArray(v)||v.length>5000)throw new Error('Invalid version list.');return v.map(row=>version(row,'modpack'))})
+    return result.value.filter(v=>v.projectId===projectId&&v.gameVersions.includes(gameVersion)).sort((a,b)=>Date.parse(b.publishedAt)-Date.parse(a.publishedAt)||a.id.localeCompare(b.id))
+  }
   async dependencyVersions(projectId:string,target:Pick<AddonTarget,'gameVersion'|'loader'>):Promise<CatalogVersion[]>{
     assertVersionId(target.gameVersion)
     const params=new URLSearchParams({game_versions:JSON.stringify([target.gameVersion])})

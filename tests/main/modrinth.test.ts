@@ -54,3 +54,13 @@ it('does not expose unsafe icons and rejects oversized project bodies and invali
   await expect(catalog.project('main','mod')).rejects.toThrow(/text|description|body/i)
   await expect(catalog.search({kind:'mod',query:'',gameVersion:'1.21.1',offset:0,limit:20,sort:'bad' as never})).rejects.toThrow(/search|sort/i)
 })
+it('lists real mrpack versions without inventing a vanilla loader tag',async()=>{
+  const f=modrinthFixture(),raw={...f.version('pack-v1','pack'),loaders:['fabric'],files:[{filename:'example.mrpack',url:'https://cdn.modrinth.com/data/pack/example.mrpack',size:10,hashes:{sha512:f.sha512},primary:true}]}
+  raw.files.push({...raw.files[0],filename:'cosign-bundle.zip',primary:false})
+  f.records.set('/project/pack/version',[raw]);f.records.set('/version/pack-v1',raw)
+  const catalog=new ModrinthCatalog(f.fetcher)
+  const versions=await catalog.modpackVersions('pack','1.21.1')
+  expect(versions[0]).toMatchObject({kind:'modpack',id:'pack-v1',files:[{filename:'example.mrpack'}]})
+  expect(new URL(f.requested[0]).searchParams.has('loaders')).toBe(false)
+  expect((await catalog.modpackVersion('pack-v1')).kind).toBe('modpack')
+})

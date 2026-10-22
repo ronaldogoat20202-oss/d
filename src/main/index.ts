@@ -10,6 +10,8 @@ import { VersionService } from './services/versions'
 import { InstallService } from './services/installer'
 import { FabricService } from './services/fabric'
 import { ModrinthCatalog } from './adapters/modrinth'
+import { ServerStore } from './services/servers'
+import { ModpackService } from './services/modpacks'
 import { AddonService } from './services/addons'
 import { JavaService } from './services/java'
 import { ProfileStore } from './services/profiles'
@@ -34,7 +36,7 @@ async function openWindow(): Promise<void> {
   }
   const controller = new Controller({
     profiles: new ProfileStore(directory),
-    catalog,addons:new AddonService(catalog),
+    catalog,servers:new ServerStore(directory),modpacks:new ModpackService(catalog,join(directory,'cache/modpacks')),addons:new AddonService(catalog),
     pickAddon:async kind=>{const result=await dialog.showOpenDialog(window,{title:'Import '+kind,properties:['openFile'],filters:[{name:kind==='mod'?'Fabric mod':'Minecraft pack',extensions:[kind==='mod'?'jar':'zip']}]});return result.canceled?null:result.filePaths[0]||null},
     configuredClientId: typeof __ORBIT_MICROSOFT_CLIENT_ID__ === 'string' ? __ORBIT_MICROSOFT_CLIENT_ID__ : '',
     settings: new SettingsStore(directory, runtime), versions: new VersionService(join(directory, 'cache')),

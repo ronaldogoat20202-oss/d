@@ -38,3 +38,21 @@ it('rejects arbitrary IDs, invalid names and versions', async () => {
   await expect(store.create({ name: '', minecraftVersion: '1.21.1', loader: 'vanilla' }, dir, { kind: 'vanilla' })).rejects.toThrow(/name/i)
   await expect(store.create({ name: 'A', minecraftVersion: '../escape', loader: 'vanilla' }, dir, { kind: 'vanilla' })).rejects.toThrow(/version/i)
 })
+it('publishes a prepared profile only after all files succeed, keeping the previous selection on failure',async()=>{
+  const store=new ProfileStore(dir),root=join(dir,'game'),input={name:'Existing',minecraftVersion:'1.21.1',loader:'vanilla' as const}
+  const first=await store.create(input,root,{kind:'vanilla'})
+  let generated=''
+  await expect(store.create({...input,name:'Broken pack'},root,{kind:'vanilla'},async p=>{generated=p.gameDirectory;await writeFile(join(generated,'partial'),'partial');throw new Error('download failed')})).rejects.toThrow('download failed')
+  expect((await store.selected())?.id).toBe(first.id);expect(await store.list()).toHaveLength(1)
+  await expect(readFile(join(generated,'partial'))).rejects.toThrow()
+  const complete=await store.create({...input,name:'Pack'},root,{kind:'vanilla'},async p=>{await writeFile(join(p.gameDirectory,'ready'),'yes')})
+  expect((await new ProfileStore(dir).selected())?.id).toBe(complete.id)
+  expect(await readFile(join(complete.gameDirectory,'ready'),'utf8')).toBe('yes')
+})
+it('cleans a prepared instance when publishing profile metadata fails',async()=>{
+  const store=new ProfileStore(dir),root=join(dir,'game')
+  await store.list();await mkdir(join(dir,'profiles.json'))
+  let generated=''
+  await expect(store.create({name:'Pack',minecraftVersion:'1.21.1',loader:'vanilla'},root,{kind:'vanilla'},async p=>{generated=p.gameDirectory;await writeFile(join(generated,'content'),'yes')})).rejects.toThrow()
+  await expect(readFile(join(generated,'content'))).rejects.toThrow()
+})

@@ -6,9 +6,9 @@ import type { LauncherApi } from '../../src/shared/contracts'
 import type { AddonPlan,CatalogVersion,ImportPreview,SearchPage } from '../../src/shared/addons'
 const library={profileId:'one',installed:[],worlds:[],needsRecovery:false}
 function api(){return{getLibrary:vi.fn(async()=>library),searchAddons:vi.fn(async()=>({projects:[],offset:0,limit:10,total:0,cached:false})),addonDetails:vi.fn(async(id,kind)=>({id,name:id,kind,description:'Content',body:'Description'})),addonVersions:vi.fn(async()=>[])} as unknown as LauncherApi}
-it('shows four content tabs, world requirement and in-game activation instructions',async()=>{
+it('shows six content tabs, world requirement and in-game activation instructions',async()=>{
   render(<LibraryView profileId="one" api={api()} busy={false} />)
-  for(const name of ['Mods','Resource packs','Data packs','Shaders'])expect(screen.getByRole('tab',{name})).toBeInTheDocument()
+  for(const name of ['Modpacks','Mods','Resource packs','Data packs','Shaders','Servers'])expect(screen.getByRole('tab',{name})).toBeInTheDocument()
   fireEvent.click(screen.getByRole('tab',{name:'Data packs'}));await screen.findByText(/create a world in Minecraft first/i)
   expect(screen.getByText(/world.*data packs|data packs.*world/i)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('tab',{name:'Shaders'}));expect(screen.getByText(/Iris.*Fabric/i)).toBeInTheDocument()
@@ -97,4 +97,36 @@ it('ignores a project description arriving after returning to results',async()=>
   fireEvent.click(screen.getByRole('button',{name:'Back to results'}))
   await act(async()=>resolve({id:'p',name:'Example',description:'Summary',kind:'mod',body:'# Stale heading'}))
   expect(screen.queryByRole('heading',{name:'Stale heading'})).not.toBeInTheDocument()
+})
+it('previews a modpack as a separate profile with its exact loader and skipped optional files',async()=>{
+  const bridge=api()
+  vi.mocked(bridge.searchAddons).mockImplementation(async q=>({projects:[{id:'pack',name:'Example Pack',description:'A modpack',kind:q.kind}],offset:0,limit:20,total:1,cached:false}))
+  bridge.modpackVersions=vi.fn(async()=>['pack-v1','pack-v2'].map(id=>({id,projectId:'pack',name:'Pack 1.0',kind:'modpack' as const,gameVersions:['1.21.1'],loaders:['fabric'],files:[],dependencies:[],publishedAt:'2026-01-01'})))
+  bridge.previewModpack=vi.fn(async()=>({id:'pack-plan',name:'Example Pack',versionName:'1.0',minecraftVersion:'1.21.1',loader:{kind:'fabric' as const,version:'0.16.0'},files:50,downloadBytes:1000,optionalFiles:2,skippedServerFiles:1}));bridge.installModpack=vi.fn(async()=>({}) as never)
+  render(<LibraryView profileId="one" api={bridge} busy={false}/>)
+  fireEvent.click(screen.getByRole('tab',{name:'Modpacks'}));fireEvent.click(await screen.findByRole('button',{name:'View Example Pack'}))
+  fireEvent.click(await screen.findByRole('button',{name:'Check installation'}))
+  await screen.findByText(/Fabric 0.16.0/)
+  expect(screen.getByText(/2 optional files.*skipped/i)).toBeInTheDocument()
+  fireEvent.change(screen.getByRole('combobox',{name:'Compatible version'}),{target:{value:'pack-v2'}})
+  expect(screen.queryByRole('button',{name:'Create modpack profile'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'Check installation'}))
+  await waitFor(()=>expect(bridge.previewModpack).toHaveBeenLastCalledWith('pack-v2'))
+  fireEvent.click(await screen.findByRole('button',{name:'Create modpack profile'}))
+  await waitFor(()=>expect(bridge.installModpack).toHaveBeenCalledWith('pack-plan'))
+  expect(bridge.previewAddon).toBeUndefined()
+})
+it('keeps loading the description when a user chooses a different version',async()=>{
+  const bridge=api();let resolve!:(v:any)=>void
+  bridge.addonDetails=vi.fn(()=>new Promise<any>(r=>{resolve=r}))
+  vi.mocked(bridge.searchAddons).mockResolvedValue({projects:[{id:'p',name:'Example',description:'Summary',kind:'mod'}],offset:0,limit:20,total:1,cached:false})
+  vi.mocked(bridge.addonVersions).mockResolvedValue(['v1','v2'].map(id=>({id,projectId:'p',name:id,kind:'mod',gameVersions:['1.21.1'],loaders:['fabric'],files:[],dependencies:[],publishedAt:'2026-01-01'})) as CatalogVersion[])
+  render(<LibraryView profileId="one" api={bridge} busy={false}/>)
+  fireEvent.click(await screen.findByRole('button',{name:'View Example'}));await screen.findByRole('option',{name:'v2'})
+  fireEvent.change(screen.getByRole('combobox',{name:'Compatible version'}),{target:{value:'v2'}})
+  await act(async()=>resolve({id:'p',name:'Example',description:'Summary',kind:'mod',body:'# Finished description'}))
+  await screen.findByRole('heading',{name:'Finished description'})
+  expect(screen.queryByText('Loading project details…')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'Back to results'}))
+  expect(screen.getByRole('button',{name:'View Example'})).toHaveFocus()
 })
