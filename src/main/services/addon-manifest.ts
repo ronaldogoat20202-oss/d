@@ -18,6 +18,8 @@ export function parseManifest(value:any,profile:GameProfile):AddonManifest {
   for(const e of value.entries){
     if(!e||typeof e.id!=='string'||!/^[A-Za-z0-9-]{1,128}$/.test(e.id)||ids.has(e.id)||!['mod','resourcepack','datapack','shader'].includes(e.kind)||typeof e.name!=='string'||e.name.length>256||!['modrinth','local'].includes(e.source)||typeof e.enabled!=='boolean'||!/^[a-f0-9]{128}$/.test(e.sha512)||!Array.isArray(e.dependencies)||e.dependencies.length>500||!e.dependencies.every((s:unknown)=>typeof s==='string')||!['declared','unverified'].includes(e.compatibility)||!['vanilla','fabric'].includes(e.loader)||typeof e.gameVersion!=='string')throw new Error('Invalid managed add-on manifest.')
     safeRelative(e.relativePath)
+    if(e.catalogDependencies!==undefined&&(!Array.isArray(e.catalogDependencies)||e.catalogDependencies.length>500||!e.catalogDependencies.every((d:any)=>d&&['required','optional','incompatible','embedded'].includes(d.type)&&[d.projectId,d.versionId].every(s=>s===null||typeof s==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(s)))))throw new Error('Invalid catalog dependency constraints.')
+    if(e.kind==='datapack'?(typeof e.worldId!=='string'||!e.worldId.startsWith(profile.id+':')):e.worldId!==null)throw new Error('Invalid managed add-on world association.')
     if(!/^(?:mods\/[^/]+\.jar|(?:resourcepacks|shaderpacks)\/[^/]+\.zip|saves\/[^/]+\/datapacks\/[^/]+\.zip|\.orbit\/disabled\/[A-Za-z0-9-]+\/[^/]+\.(?:jar|zip))$/i.test(e.relativePath)||paths.has(e.relativePath.toLowerCase()))throw new Error('Invalid or colliding managed content path.')
     ids.add(e.id);paths.add(e.relativePath.toLowerCase())
   }

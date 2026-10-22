@@ -91,6 +91,38 @@ it('uses official local Java metadata for modern Minecraft versions instead of g
   await mkdir(join(p.libraryRoot,'versions/26.1.1'),{recursive:true});await writeFile(join(p.libraryRoot,'versions/26.1.1/26.1.1.json'),JSON.stringify({javaVersion:{majorVersion:25}}))
   const plan=await s.plan(p,{kind:'mod',projectId:'modern'});await s.install(p,plan.id,()=>{});await s.assertReady(p,25)
 })
+it.each([true,false])('reconciles unavailable world packs without blocking other worlds or deleting remaining files (delete folder: %s)',async deleteFolder=>{
+  const {fixture:f,profile:p,service:s}=setup();await mkdir(join(p.gameDirectory,'saves/World'),{recursive:true});await writeFile(join(p.gameDirectory,'saves/World/level.dat'),'world')
+  f.add('data','data-v1',{'pack.mcmeta':'{"pack":{"pack_format":48}}','data/test/a':'x'},'datapack')
+  const worldId=(await s.library(p)).worlds[0].id,plan=await s.plan(p,{kind:'datapack',projectId:'data',worldId});await s.install(p,plan.id,()=>{})
+  const entry=(await s.library(p)).installed[0],path=join(p.gameDirectory,entry.relativePath),bytes=await readFile(path)
+  await rm(join(p.gameDirectory,deleteFolder?'saves/World':'saves/World/level.dat'),{recursive:true})
+  await s.assertReady(p);await s.remove(p,entry.id);expect((await s.library(p)).installed).toEqual([])
+  if(!deleteFolder)expect(await readFile(path)).toEqual(bytes)
+})
+it('keeps exact catalog version requirements when re-enabling a dependent',async()=>{
+  const {fixture:f,profile:p,service:s}=setup();f.add('dep','dep-v1',f.mod('dependency'));f.add('main','main-v1',f.mod('mainmod'),'mod',[{project_id:'dep',version_id:'dep-v1',dependency_type:'required'}])
+  const plan=await s.plan(p,{kind:'mod',projectId:'main'});await s.install(p,plan.id,()=>{})
+  const entries=(await s.library(p)).installed,main=entries.find(e=>e.projectId==='main')!,dep=entries.find(e=>e.projectId==='dep')!
+  await s.setEnabled(p,main.id,false);f.add('dep','dep-v2',f.mod('dependency','2.0.0'));await s.update(p,dep.id,()=>{})
+  await expect(s.setEnabled(p,main.id,true)).rejects.toThrow(/require|depend/i)
+})
+it('keeps catalog incompatibility declarations when re-enabling content',async()=>{
+  const {fixture:f,profile:p,service:s}=setup();f.add('first','first-v1',f.mod('firstmod'),'mod',[{project_id:'second',version_id:null,dependency_type:'incompatible'}]);f.add('second','second-v1',f.mod('secondmod'))
+  let plan=await s.plan(p,{kind:'mod',projectId:'first'});await s.install(p,plan.id,()=>{});const first=(await s.library(p)).installed[0];await s.setEnabled(p,first.id,false)
+  plan=await s.plan(p,{kind:'mod',projectId:'second'});await s.install(p,plan.id,()=>{})
+  await expect(s.setEnabled(p,first.id,true)).rejects.toThrow(/incompatible/i)
+})
+it('ignores dormant unmanaged Fabric JARs when launching a Vanilla profile',async()=>{
+  const {fixture:f,profile:p,service:s}=setup();p.loader={kind:'vanilla'}
+  await mkdir(join(p.gameDirectory,'mods'),{recursive:true});await writeFile(join(p.gameDirectory,'mods/dormant.jar'),zipFixture(f.mod('dormant','1.0.0',{minecraft:'1.20.x',fabricloader:'>=0.16'})))
+  await s.assertReady(p)
+})
+it.each([true,false])('resolves a shader declaring a required Iris mod in its own content kind (pinned: %s)',async pinned=>{
+  const {fixture:f,profile:p,service:s}=setup();f.add('YL57xq9U','iris-v1',f.mod('iris'));f.add('shader','shader-v1',{'shaders/test.fsh':'shader'},'shader',[{project_id:'YL57xq9U',version_id:pinned?'iris-v1':null,dependency_type:'required'}])
+  const plan=await s.plan(p,{kind:'shader',projectId:'shader'});expect(plan.entries.map(e=>e.kind)).toEqual(['mod','shader'])
+  await s.install(p,plan.id,()=>{});await s.assertReady(p)
+})
 it('targets resource packs, per-world data packs and shaders, including compatible Iris dependencies',async()=>{
   const {fixture:f,profile:p,service:s}=setup()
   await mkdir(join(p.gameDirectory,'saves/World'),{recursive:true});await writeFile(join(p.gameDirectory,'saves/World/level.dat'),'world')

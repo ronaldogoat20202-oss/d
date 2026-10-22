@@ -4,7 +4,7 @@ export function AddonDetails({project,versions,versionId,plan,busy,onVersion,onP
   return <section className="panel addon-details" aria-label="Add-on details">
     <div className="panel-heading"><h2>{project.name}</h2><button className="text-button" onClick={onClose}>Close details</button></div>
     <p>{project.description}</p>
-    {versions.length?<><label>Compatible version<select value={versionId} onChange={e=>onVersion(e.target.value)}>{versions.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+    {versions.length?<><label>Compatible version<select disabled={busy} value={versionId} onChange={e=>onVersion(e.target.value)}>{versions.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
       <p>For Minecraft {version?.gameVersions.join(', ')} · {version?.loaders.join(', ')}</p>
       {!!version?.dependencies.length&&<p>{version.dependencies.filter(d=>d.type==='required').length} required dependencies. Optional dependencies are shown separately.</p>}
       <button className="secondary" disabled={busy||!version} onClick={onPreview}>Check installation</button>

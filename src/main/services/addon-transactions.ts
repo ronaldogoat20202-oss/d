@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { GameProfile } from '../../shared/profiles'
 import { addonPath,ensureAddonDirectory,parseManifest,readManifest,writeManifest,type AddonManifest } from './addon-manifest'
 import { fileHash } from './addon-imports'
+import { unavailableWorld } from './worlds'
 interface Move { from:string; to:string; sha512:string }
 interface Journal { schema:1; profileId:string; before:AddonManifest; after:AddonManifest; moves:Move[]; done:number; directory:string }
 export interface AddonWrite { relativePath:string; source:string; sha512:string }
@@ -13,6 +14,14 @@ export async function unchanged(profile:GameProfile,path:string,digest:string):P
 export class AddonTransactions {
   constructor(private hook?:(stage:'staged'|'moved'|'manifest')=>void|Promise<void>){}
   async pending(profile:GameProfile):Promise<boolean>{await ensureAddonDirectory(profile);return exists(await addonPath(profile,'.orbit/pending.json'))}
+  async forgetWorldEntry(profile:GameProfile,before:AddonManifest,id:string):Promise<void>{
+    if(await this.pending(profile))throw new Error('Recover the pending transaction first.')
+    if(JSON.stringify(await readManifest(profile))!==JSON.stringify(before))throw new Error('The add-on manifest changed. Refresh the library.')
+    const entry=before.entries.find(e=>e.id===id)
+    if(entry?.kind!=='datapack'||!entry.worldId||!await unavailableWorld(profile,entry.worldId))throw new Error('Only an unavailable world entry can be forgotten.')
+    // No file is removed: even remaining or modified files stay with that world.
+    await writeManifest(profile,{...before,entries:before.entries.filter(e=>e.id!==id)})
+  }
   private async save(profile:GameProfile,journal:Journal){const path=await addonPath(profile,'.orbit/pending.json');await writeFile(path+'.part',JSON.stringify(journal));await rename(path+'.part',path)}
   async commit(profile:GameProfile,before:AddonManifest,after:AddonManifest,writes:AddonWrite[]):Promise<void>{
     if(await this.pending(profile))throw new Error('Recover the interrupted add-on transaction before continuing.')
@@ -47,7 +56,7 @@ export class AddonTransactions {
       else throw new Error('Recovery needs a missing staged file. Preserve the pending transaction and restore the file.')
       journal.done=i+1;await this.save(profile,journal);await this.hook?.('moved')
     }
-    for(const e of journal.after.entries)await unchanged(profile,e.relativePath,e.sha512)
+    for(const e of journal.after.entries){if(e.kind==='datapack'&&e.worldId&&await unavailableWorld(profile,e.worldId))continue;await unchanged(profile,e.relativePath,e.sha512)}
     await writeManifest(profile,journal.after);await this.hook?.('manifest')
     for(const move of journal.moves.filter(m=>m.to.startsWith(journal.directory+'/'))){if(await exists(await addonPath(profile,move.to))){await unchanged(profile,move.to,move.sha512);await rm(await addonPath(profile,move.to))}}
     await rmdir(await addonPath(profile,journal.directory)).catch(()=>undefined)

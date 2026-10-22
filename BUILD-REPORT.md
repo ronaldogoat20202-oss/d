@@ -1,6 +1,6 @@
 # Orbit Launcher 0.2.0 verification report
 
-Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review and Windows delivery are in progress.
+Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review and its regression-tested fix pass are complete. Windows delivery is in progress.
 
 ## Implemented
 
@@ -11,10 +11,10 @@ Actual Fabric metadata is checked before content commit. Live Iris testing found
 ## Verification evidence
 
 - Type checking and production build: exit 0 during Library integration and release checks.
-- Automated service/renderer suite: latest completed release run **151 passed, 1 opt-in live test skipped**, including the modern Java-metadata regression/fix.
+- Automated service/renderer suite: final release suite **160 passed, 1 opt-in live test skipped** across30 test files, including all review regressions.
 - Browser flows: **4 passed**, including offline account/install/launch simulation, Fabric profile/mod/per-world data-pack management, empty state and 900×650 overflow checks. These use injected test data.
 - Explicit live provider check: official release list, Fabric stable-loader/profile metadata, Modrinth data/shader searches, and real Iris/Sodium bundle download, hashes, installation and manifest compatibility check passed. It did not start Minecraft or render shaders.
-- The real production Electron app started under headless Linux using an isolated user-data directory. Its production preload created a saved offline account, resolved stable Fabric loader0.19.5 forMinecraft1.21.1, created a real game profile and returned its empty Library state. The actual Library screen rendered. No test bridge was injected; Minecraft itself was not started. Independent whole-change review is pending.
+- The real production Electron app started under headless Linux using an isolated user-data directory. Its production preload created a saved offline account, resolved stable Fabric loader0.19.5 forMinecraft1.21.1, created a real game profile and returned its empty Library state. The actual Library screen rendered. No test bridge was injected; Minecraft itself was not started. The production desktop smoke check passed again after the review fixes.
 - TLS/checksum verification remains enabled; no Microsoft client identity or credentials were borrowed.
 
 ## External prerequisites and practical limits
@@ -23,7 +23,7 @@ No registered Orbit Microsoft client ID or owning-account session was supplied. 
 
 Actual Windows execution, compatible Java native loading, game startup, opening a world, mod behavior and shader rendering require the README manual acceptance checks. Linux Electron and browser checks do not prove these.
 
-Archive limits: 100000 total entries; 262144 bytes per inspected metadata entry; 1048576 total metadata bytes; nested JARs limited to depth3,64MiB each,128MiB aggregate; outer archives capped512MiB. Unknown pack compatibility requires confirmation. Only a supported subset of Fabric version predicates/graphs is accepted. Unmanaged files are not modified or adopted.
+Archive limits: 100000 total entries; 262144 bytes per inspected metadata entry; 1048576 total metadata bytes; nested JARs limited to depth3,64MiB each,128MiB aggregate; outer archives capped512MiB. Unknown pack compatibility requires confirmation. Only a supported subset of Fabric version predicates/graphs is accepted. Physical power-loss durability, exhaustive archive fuzzing and hostile concurrent filesystem mutation were not verified. Unmanaged files are not modified or adopted.
 
 ## Delivery
 
@@ -31,7 +31,15 @@ Expected CI artifact: **Orbit-Launcher-Windows-x64**, containing **Orbit-Launche
 
 ## Review and decisions
 
-One fresh whole-change reviewer will inspect the upgrade after local verification. Confirmed Important/Critical findings get one regression-tested fix pass. No per-task reviewer loops were used.
+One fresh gpt-6-astra reviewer inspected the entire upgrade. No Critical findings and five Important findings were identified. All five were accepted and corrected in one fix pass with observed failing regressions followed by the green full suite:
+
+1. Unavailable-world data-pack records are inactive for launch and can be explicitly forgotten without deleting any remaining files.
+2. Complete catalog dependency declarations, exact version pins and incompatibilities persist and are enforced on enable and launch without requiring a network request.
+3. Vanilla profiles ignore dormant unmanaged Fabric mods.
+4. Version selection invalidates pending previews and is disabled during checking.
+5. Required dependency versions use their own content kind; pinned/unpinned shader→Iris plans both install correctly.
+
+No review findings were deferred as minor polish. The full suite, types, browser flows, production build, actual provider/Iris check and real Electron smoke were green after the fixes. No second review or per-task reviewer loops were used. Material build warnings were limited to ignored third-party `use client` directives and conflicting color-output variables; no check failed because of them.
 
 ### Upgrade rulings
 
@@ -47,6 +55,12 @@ One fresh whole-change reviewer will inspect the upgrade after local verificatio
 
 - Task 10: Ruling: normalize duplicate bundled module candidates with supported dependency predicates; preserve strict conflict errors for duplicate top-level IDs — actual Iris/Sodium both embed fabric-api-base — cost if wrong: conservative rejection of more complex valid Fabric graphs; real bundle now passes.
 - Task 10: Ruling: derive Java requirements from installed official metadata and pass the verified game major at launch; defer Java-specific content checks until metadata exists — version-name guessing breaks modern releases — cost if wrong: a pre-game-install preview may later fail a Java compatibility check before launch.
+
+- Final: Ruling: real Windows installation, Java native loading, gameplay/world loading and shader rendering were not judged — require the README manual acceptance checks and do not claim them from Linux — cost if wrong: platform/game-specific defects remain.
+- Final: Ruling: live Microsoft registration, owning-account authentication, refresh and entitlements were not judged — retain the publisher-registration prerequisite because no real identity/account was supplied — cost if wrong: provider/account-specific authentication issues remain.
+- Final: Ruling: exhaustive Fabric graphs were not judged — explicitly support a conservative subset with visible errors rather than claiming the full Fabric solver — cost if wrong: valid complex mod bundles can be rejected.
+- Final: Ruling: physical power-loss durability, exhaustive archive fuzzing and hostile concurrent filesystem mutation were not judged — retain bounded inspection, containment/digest checks and tested journal recovery while documenting those unverified domains — cost if wrong: hardware failure or adversarial races can require manual repair.
+- Final: Ruling: generated installer contents/final delivery were not judged by the reviewer — gate delivery on the exact tested commit succeeding in Windows CI with the expected artifact, and retain manual Windows execution checks — cost if wrong: Windows-only artifact/runtime problems remain.
 
 ### Earlier 0.1.0 decisions retained for traceability
 

@@ -15,6 +15,10 @@ export async function resolveWorld(profile:GameProfile,id:string):Promise<string
   if(!(await lstat(saves)).isDirectory()||!(await lstat(path)).isDirectory()||!(await lstat(join(path,'level.dat'))).isFile())throw new Error('The selected world is no longer available.')
   return path
 }
+export async function unavailableWorld(profile:GameProfile,id:string):Promise<boolean>{
+  nameFrom(profile,id)
+  try{await resolveWorld(profile,id);return false}catch(e){const code=(e as NodeJS.ErrnoException).code;if(code&&!['ENOENT','ENOTDIR'].includes(code))throw e;return true}
+}
 export async function listWorlds(profile:GameProfile):Promise<WorldSummary[]> {
   const saves=join(profile.gameDirectory,'saves');let names:string[]
   try{if(!(await lstat(saves)).isDirectory())return [];names=await readdir(saves)}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e}

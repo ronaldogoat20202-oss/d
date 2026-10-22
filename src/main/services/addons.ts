@@ -32,6 +32,7 @@ export class AddonService {
   private remember<T>(map:Map<string,T>,id:string,value:T){if(map.size>=20)map.delete(map.keys().next().value!);map.set(id,value)}
   async library(p:GameProfile):Promise<LibraryState>{const m=await readManifest(p);return {profileId:p.id,worlds:await this.worlds.listWorlds(p),installed:m.entries,needsRecovery:await this.transactions.pending(p)}}
   private async ready(p:GameProfile){if(await this.transactions.pending(p))throw new Error('Recover the interrupted add-on transaction before launching or changing content.')}
+  private async effective(p:GameProfile,entries:ManagedAddon[]):Promise<ManagedAddon[]>{return Promise.all(entries.map(async e=>e.kind==='datapack'&&e.worldId&&await this.worlds.unavailableWorld(p,e.worldId)?{...e,enabled:false}:e))}
   private async cache(p:GameProfile,v:CatalogVersion,onProgress:Progress):Promise<string>{
     const file=v.files[0];safeFilename(file.filename)
     const path=await addonPath(p,`.orbit/cache/${file.sha512}${v.kind==='mod'?'.jar':'.zip'}`)
@@ -41,6 +42,7 @@ export class AddonService {
     return path
   }
   private async units(p:GameProfile,entries:ManagedAddon[],sources=new Map<string,string>(),knownEntries=entries):Promise<ModUnit[]>{
+    if(p.loader.kind!=='fabric')return []
     const units:ModUnit[]=[],managedNames=new Set([...entries,...knownEntries].filter(e=>e.kind==='mod').map(e=>basename(e.relativePath).toLowerCase()))
     for(const e of entries.filter(e=>e.enabled&&e.kind==='mod')){const path=sources.get(e.id)||await addonPath(p,e.relativePath);for(const mod of (await this.imports.inspectArchive(path)).mods)units.push({mod,owner:e.projectId})}
     // Existing user-managed mods participate in compatibility checks; they are never adopted or changed.
@@ -78,12 +80,13 @@ export class AddonService {
     if(request?.kind==='datapack'){if(!request.worldId)throw new Error('Choose an existing world for this data pack.');await this.worlds.resolveWorld(p,request.worldId)}
     if((request?.kind==='mod'||request?.kind==='shader'||needsIris)&&p.loader.kind!=='fabric')throw new Error('Mods and Iris shader packs require a Fabric game profile.')
     const roots:ContentRequest[]=request?[request]:[]
-    const existingUnits=await this.units(p,manifest.entries),javaMajor=await this.javaMajor(p)
-    if((request?.kind==='shader'||needsIris)&&!existingUnits.some(u=>u.mod.id==='iris'))roots.push({kind:'mod',projectId:IRIS})
+    const effective=await this.effective(p,manifest.entries),existingUnits=await this.units(p,effective),javaMajor=await this.javaMajor(p)
+    const addIris=(request?.kind==='shader'||needsIris)&&!existingUnits.some(u=>u.mod.id==='iris')
     const pinned=new Map<string,CatalogVersion>(),seen=new Set<string>();let versions:CatalogVersion[]=[],optional:string[]=[]
     for(let attempt=0;attempt<32;attempt++){
-      const proxy={version:(id:string)=>this.catalog.version(id),versions:async(id:string,t:AddonTarget)=>pinned.has(id)?[pinned.get(id)!]:this.catalog.versions(id,t)}
-      const resolved=await Promise.all(roots.map(r=>this.dependencies(r,target(p,r.kind),manifest.entries,proxy)))
+      const proxy={version:(id:string)=>this.catalog.version(id),versions:async(id:string,t:AddonTarget)=>pinned.has(id)?[pinned.get(id)!]:this.catalog.versions(id,t),dependencyVersions:async(id:string,t:Pick<AddonTarget,'gameVersion'|'loader'>)=>pinned.has(id)?[pinned.get(id)!]:this.catalog.dependencyVersions(id,t)}
+      const resolved=await Promise.all(roots.map(r=>this.dependencies(r,target(p,r.kind),effective,proxy)))
+      if(addIris&&!resolved.some(group=>group.versions.some(v=>v.projectId===IRIS)))resolved.push(await this.dependencies({projectId:IRIS},target(p,'mod'),effective,proxy))
       const byProject=new Map<string,CatalogVersion>();for(const group of resolved)for(const v of group.versions){const prior=byProject.get(v.projectId);if(prior&&prior.id!==v.id)throw new Error('Conflicting dependency versions across content plans.');byProject.set(v.projectId,v)}
       versions=Array.from(byProject.values());if(versions.length>100)throw new Error('The add-on dependency plan is too large.')
       optional=Array.from(new Set(resolved.flatMap(g=>g.optionalDependencies)))
@@ -118,16 +121,23 @@ export class AddonService {
     for(const v of prepared.versions){
       const file=v.files[0],old=after.entries.find(e=>e.projectId===v.projectId&&e.kind===v.kind&&e.worldId===(v.kind==='datapack'?prepared.worldId:null)),id=old?.id||randomUUID()
       const path=await this.cache(p,v,onProgress),active=await this.activePath(p,v.kind,file.filename,prepared.worldId)
-      const entry:ManagedAddon={id,kind:v.kind,name:v.name,source:'modrinth',projectId:v.projectId,versionId:v.id,relativePath:active,sha512:file.sha512,providerSize:file.size,providerSha512:file.sha512,enabled:true,worldId:v.kind==='datapack'?prepared.worldId:null,dependencies:v.dependencies.filter(d=>d.type==='required').map(d=>d.projectId||d.versionId||''),compatibility:'declared',gameVersion:p.minecraftVersion,loader:p.loader.kind}
+      const entry:ManagedAddon={id,kind:v.kind,name:v.name,source:'modrinth',projectId:v.projectId,versionId:v.id,relativePath:active,sha512:file.sha512,providerSize:file.size,providerSha512:file.sha512,enabled:true,worldId:v.kind==='datapack'?prepared.worldId:null,dependencies:v.dependencies.filter(d=>d.type==='required').map(d=>d.versionId||d.projectId||''),catalogDependencies:structuredClone(v.dependencies),compatibility:'declared',gameVersion:p.minecraftVersion,loader:p.loader.kind}
       after.entries=after.entries.filter(e=>e.id!==id);after.entries.push(entry);writes.push({relativePath:active,source:path,sha512:file.sha512});sources.set(id,path)
     }
     return {after,writes,sources}
   }
   private async validate(p:GameProfile,entries:ManagedAddon[],sources?:Map<string,string>,knownEntries=entries,javaMajor?:number){
+    entries=await this.effective(p,entries)
     for(const e of entries.filter(e=>e.enabled)){if(e.gameVersion!==p.minecraftVersion||e.loader!==p.loader.kind)throw new Error('Managed content belongs to another Minecraft version or loader.');if(e.kind==='datapack')await this.worlds.resolveWorld(p,e.worldId!)}
     this.check(p,await this.units(p,entries,sources,knownEntries),entries.some(e=>e.enabled&&e.kind==='shader'),javaMajor??await this.javaMajor(p))
     const active=new Set(entries.filter(e=>e.enabled).flatMap(e=>[e.id,e.projectId,e.versionId].filter(Boolean)))
     for(const e of entries.filter(e=>e.enabled))for(const dep of e.dependencies)if(!active.has(dep))throw new Error(`${e.name} requires another enabled dependency.`)
+    const enabled=entries.filter(e=>e.enabled)
+    for(const e of enabled)for(const d of e.catalogDependencies||[]){
+      const other=d.projectId?enabled.find(v=>v.projectId===d.projectId):enabled.find(v=>v.versionId===d.versionId)
+      if(d.type==='required'&&(!other||d.versionId&&other.versionId!==d.versionId))throw new Error(`${e.name} requires a different enabled dependency version.`)
+      if(d.type==='incompatible'&&other&&(!d.versionId||other.versionId===d.versionId))throw new Error(`${e.name} declares incompatible enabled content.`)
+    }
   }
   async install(p:GameProfile,planId:string,onProgress:Progress):Promise<void>{return this.lock(p,async()=>{const plan=this.plans.get(planId);if(!plan)throw new Error('This add-on plan is stale. Prepare it again.');const before=await this.current(p,plan),{after,writes,sources}=await this.entries(p,before,plan,onProgress);await this.validate(p,after.entries,sources,before.entries);await this.transactions.commit(p,before,after,writes);this.plans.delete(planId)})}
   async prepareImport(p:GameProfile,path:string,kind:AddonKind,worldId?:string):Promise<ImportPreview>{return this.lock(p,async()=>{
@@ -155,7 +165,7 @@ export class AddonService {
     entry.relativePath=enabled?await this.activePath(p,entry.kind,filename,entry.worldId):`.orbit/disabled/${id}/${filename}`;entry.enabled=enabled
     await this.validate(p,after.entries,new Map([[id,oldPath]]),before.entries);await this.transactions.commit(p,before,after,[])
   })}
-  async remove(p:GameProfile,id:string):Promise<void>{return this.lock(p,async()=>{await this.ready(p);const before=await readManifest(p),entry=before.entries.find(e=>e.id===id);if(!entry)throw new Error('Choose an installed add-on.');await unchanged(p,entry.relativePath,entry.sha512);const after={...before,entries:before.entries.filter(e=>e.id!==id)};await this.validate(p,after.entries,undefined,before.entries);await this.transactions.commit(p,before,after,[])})}
+  async remove(p:GameProfile,id:string):Promise<void>{return this.lock(p,async()=>{await this.ready(p);const before=await readManifest(p),entry=before.entries.find(e=>e.id===id);if(!entry)throw new Error('Choose an installed add-on.');if(entry.kind==='datapack'&&entry.worldId&&await this.worlds.unavailableWorld(p,entry.worldId)){await this.transactions.forgetWorldEntry(p,before,id);return}await unchanged(p,entry.relativePath,entry.sha512);const after={...before,entries:before.entries.filter(e=>e.id!==id)};await this.validate(p,after.entries,undefined,before.entries);await this.transactions.commit(p,before,after,[])})}
   async update(p:GameProfile,id:string,onProgress:Progress):Promise<void>{
     return this.lock(p,async()=>{
     const before=await readManifest(p),entry=before.entries.find(e=>e.id===id)
@@ -169,5 +179,5 @@ export class AddonService {
     })
   }
   async recover(p:GameProfile):Promise<void>{return this.lock(p,()=>this.transactions.recover(p))}
-  async assertReady(p:GameProfile,javaMajor?:number):Promise<void>{await this.ready(p);const manifest=await readManifest(p);for(const e of manifest.entries.filter(e=>e.enabled))await unchanged(p,e.relativePath,e.sha512);await this.validate(p,manifest.entries,undefined,manifest.entries,javaMajor)}
+  async assertReady(p:GameProfile,javaMajor?:number):Promise<void>{await this.ready(p);const manifest=await readManifest(p),effective=await this.effective(p,manifest.entries);for(const e of effective.filter(e=>e.enabled))await unchanged(p,e.relativePath,e.sha512);await this.validate(p,effective,undefined,manifest.entries,javaMajor)}
 }

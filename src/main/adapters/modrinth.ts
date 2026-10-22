@@ -59,4 +59,10 @@ export class ModrinthCatalog {
     return result.value.filter(v=>v.projectId===projectId&&compatible(v,target)).sort((a,b)=>Date.parse(b.publishedAt)-Date.parse(a.publishedAt)||a.id.localeCompare(b.id))
   }
   async version(versionId:string):Promise<CatalogVersion>{const v=(await this.request('/version/'+id(versionId),v=>version(v))).value;if(v.id!==versionId)throw new Error('Unexpected Modrinth version identity.');return v}
+  async dependencyVersions(projectId:string,target:Pick<AddonTarget,'gameVersion'|'loader'>):Promise<CatalogVersion[]>{
+    assertVersionId(target.gameVersion)
+    const params=new URLSearchParams({game_versions:JSON.stringify([target.gameVersion])})
+    const result=await this.request('/project/'+id(projectId)+'/version?'+params,v=>{if(!Array.isArray(v)||v.length>5000)throw new Error('Invalid dependency version list.');return v.map(row=>version(row))})
+    return result.value.filter(v=>v.projectId===projectId&&compatible(v,{...target,kind:v.kind})).sort((a,b)=>Date.parse(b.publishedAt)-Date.parse(a.publishedAt)||a.id.localeCompare(b.id))
+  }
 }

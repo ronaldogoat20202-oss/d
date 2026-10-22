@@ -25,6 +25,8 @@ Select the intended game profile, then open **Library**. Search Modrinth, choose
 
 Disable moves managed files outside active game directories; enable restores them. Required dependents prevent unsafe removal/disable. **Update** checks compatible catalog versions and preserves disabled state. Local imports are replaced through another import and have no catalog-update action. Orbit preserves a managed file if its bytes changed, reporting a conflict instead of overwriting/removing it. Files installed outside Orbit remain unmanaged.
 
+Deleting a world in Minecraft makes its managed data-pack records inactive and does not block other worlds. **Forget** removes an unavailable world's Library record while leaving any remaining files unchanged.
+
 Interrupted changes show **Recover add-ons** and block that profile's launch. Recovery verifies staged/installed bytes and completes the journaled transaction. A conflict preserves the files and pending journal under `<game folder>/.orbit`; restore the expected files or retain that folder for diagnosis before retrying. Orbit does not edit `options.txt`, shader preferences or `level.dat` to activate packs.
 
 ## Microsoft sign-in: publisher setup
