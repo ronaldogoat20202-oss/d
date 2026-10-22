@@ -15,7 +15,14 @@ Saved server CRUD is atomic and local. Join resolves a saved main-process addres
 - A real Fabulously Optimized6.5.0 package (`N276l2ON`) previewed113 files and44,322,932 download bytes, then installed in a separate MC1.21.1/Fabric0.19.3 profile. Library returned51 enabled managed entries (48mods,3resourcepacks); each installed managed file matched its SHA-512. Original Fabric0.19.5 profile/files stayed intact. Final operation idle/error=null; temporary game/userData removed.
 - The live pack exposed a valid auxiliary cosign ZIP alongside its primary mrpack. A regression failed before the parser fix and passed after selecting/validating the declared primary file. Size/hash/host checks remain enforced on the installed artifact; ambiguous primary selection is rejected.
 - Chromium image requests encountered the cloud environment's certificate-authority error; the intended fallback icons rendered. Main-process API/download TLS verification passed. No TLS checks were disabled. Native image rendering on the user's Windows trust store remains manual.
-- Review and exact Windows CI artifact details follow after final review/build completion.
+- Fresh whole-change review (gpt-6-astra) found **no Critical/Important issues** and independently passed69 relevant tests. No review fix pass was required. Two Minor findings are deferred: an asynchronously rejected preview can show its old error after switching projects in the same context; abrupt process termination can retain an unpublished instance/archive cache because that operation has no persisted cleanup marker. Install targeting and existing profile files remain protected. These cases were identified by review, not an actual power-loss test.
+- Actual Windows CI **passed** for the exact release code commit `bc14fca28d256a87af4012c12912caa13f655c0c`: [run39771386173](https://github.com/ronaldogoat20202-oss/d/actions/runs/39771386173). Clean dependency install, type/unit/browser checks and NSIS packaging completed in3minutes. Root independently verified the exact SHA, success state, expected artifact name/ID and archive digest in GitHub's public run data.
+
+## 0.3.0 Windows download
+
+[Download artifacts](https://github.com/ronaldogoat20202-oss/d/actions/runs/39771386173#artifacts) → **Orbit-Launcher-Windows-x64**, artifact ID `12421904476`. Sign into GitHub, download/extract the ZIP, then open **Orbit-Launcher-0.3.0-Setup.exe** on Windows10/11x64. The GitHub artifact archive SHA-256 is `cd4f2f2c3127a2efafb8326c70c2b63b8568e7746289d2eec4b897816b9d0768` (archive digest, not a separately inspected executable digest).
+
+The following documentation-only commit does not change the tested application. Windows app execution/gameplay remains a manual check; this build is unsigned.
 
  Real Microsoft login, actual Minecraft gameplay/shader rendering, and execution on a user's Windows machine still require manual acceptance. No registered Orbit Microsoft client ID has been supplied.
 
