@@ -1,6 +1,6 @@
 # Orbit Launcher 0.2.0 verification report
 
-Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review and its regression-tested fix pass are complete. Windows delivery is in progress.
+Date: 2026-10-22. Implementation: Native in the existing `/workspace/d` checkout, branch `work`. Upgrade baseline: `233cf07`. Final review, its regression-tested fix pass, and Windows CI delivery are complete. Built application/test commit: `afed5731dc633a41d96fd57e2c547b4921194b5a`.
 
 ## Implemented
 
@@ -10,7 +10,7 @@ Actual Fabric metadata is checked before content commit. Live Iris testing found
 
 ## Verification evidence
 
-- Type checking and production build: exit 0 during Library integration and release checks.
+- Clean `npm ci`, type checking and production build: exit 0. Windows CI also completed its clean install, type/service/renderer/browser checks and NSIS packaging.
 - Automated service/renderer suite: final release suite **160 passed, 1 opt-in live test skipped** across30 test files, including all review regressions.
 - Browser flows: **4 passed**, including offline account/install/launch simulation, Fabric profile/mod/per-world data-pack management, empty state and 900×650 overflow checks. These use injected test data.
 - Explicit live provider check: official release list, Fabric stable-loader/profile metadata, Modrinth data/shader searches, and real Iris/Sodium bundle download, hashes, installation and manifest compatibility check passed. It did not start Minecraft or render shaders.
@@ -27,7 +27,15 @@ Archive limits: 100000 total entries; 262144 bytes per inspected metadata entry;
 
 ## Delivery
 
-Expected CI artifact: **Orbit-Launcher-Windows-x64**, containing **Orbit-Launcher-0.2.0-Setup.exe**. Final successful run/artifact link will be recorded after the authorized push. Workspace `.exe` previews are not a download mechanism. The installer is unsigned. The old0.1.0 portable file is not the updated application.
+Successful Windows build: [run39700508238](https://github.com/ronaldogoat20202-oss/d/actions/runs/39700508238), full commit `afed5731dc633a41d96fd57e2c547b4921194b5a`.
+
+Download: [run artifacts](https://github.com/ronaldogoat20202-oss/d/actions/runs/39700508238#artifacts) → **Orbit-Launcher-Windows-x64**, artifact ID `12392293581`. Sign into GitHub, download/extract the ZIP and run **Orbit-Launcher-0.2.0-Setup.exe**. The artifact's GitHub archive SHA-256 is `1815a790cece9837f4b6e5e4d4fe8c858a09eb922a5f4a6a3c89004cf5cdd8ef`; this is the uploaded archive digest, not a separately inspected installer executable digest.
+
+The first Windows run (`39700244691`) exposed a test-only path-separator mismatch. The assertion now parses the native classpath delimiter and normalizes each path. The subsequent Windows run above passed; product launch code was unchanged by that correction.
+
+Workspace `.exe` previews are not a download mechanism. The installer is unsigned. Actual execution on the user's Windows machine remains manual. The old0.1.0 portable file is not the updated application.
+
+Cloud configuration was inspected without dropping existing domains or secrets. The final source checkout and corrected startup instructions are prepared for the environment draft. Publishing that draft is a user UI action; current-workspace checks do not prove fresh-task restoration.
 
 ## Review and decisions
 

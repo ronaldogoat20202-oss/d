@@ -4,7 +4,7 @@ A custom **Minecraft Java Edition launcher for Windows 10/11 x64** with Microsof
 
 ## Install and test on Windows
 
-Download the **Orbit-Launcher-Windows-x64** artifact from the successful [Windows launcher workflow](https://github.com/ronaldogoat20202-oss/d/actions/workflows/windows.yml). Sign into GitHub, open the successful run, scroll to **Artifacts**, download the ZIP, extract it, and open **Orbit-Launcher-0.2.0-Setup.exe**. The executable runs on your Windows computer; ChatGPT's workspace preview cannot run it. Installers are unsigned.
+Download the **Orbit-Launcher-Windows-x64** artifact from [the verified0.2.0 Windows build](https://github.com/ronaldogoat20202-oss/d/actions/runs/39700508238#artifacts). Sign into GitHub, open the successful run, scroll to **Artifacts**, download the ZIP, extract it, and open **Orbit-Launcher-0.2.0-Setup.exe**. The executable runs on your Windows computer; ChatGPT's workspace preview cannot run it. Installers are unsigned.
 
 1. Open Orbit. On **Play**, create a game profile, choose a Minecraft version and **Vanilla** or **Fabric**. Fabric pins the newest stable loader available for that version.
 2. Click **Install Minecraft**. Game downloads are verified and need no account or Java configuration.

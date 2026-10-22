@@ -1,7 +1,7 @@
 # Orbit accounts and add-ons design
 
 Date: 2026-10-21
-Status: implementation, local/live verification and independent review/fixes complete; Windows delivery in progress
+Status: implemented, reviewed, verified locally/live, and delivered through successful Windows CI run39700508238; manual Windows gameplay/Microsoft checks remain
 Baseline: `ec616bf` on `work`
 
 ## Intent and agreed scope
