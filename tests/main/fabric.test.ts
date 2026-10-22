@@ -1,7 +1,7 @@
 import { afterEach,beforeEach,expect,it } from 'vitest'
 import { mkdtemp,readFile,rm,writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter,join,normalize } from 'node:path'
 import { generateArguments,Version } from '@xmcl/core'
 import { FabricService } from '../../src/main/services/fabric'
 import { makeLaunchOptions } from '../../src/main/adapters/minecraft-launcher'
@@ -21,7 +21,8 @@ it('uses the base client JAR for an inherited Fabric launch and verifies extra l
   expect(resolved.mainClass).toBe('net.fabricmc.loader.impl.launch.knot.KnotClient')
   const options=await makeLaunchOptions({settings:{clientId:'',javaPath:'/java',gameDirectory:dir,maxMemoryMiB:2048},version:installed,session:{kind:'offline',profile:{kind:'offline',id:'b50ad385829d3141a2167e7d7539ba7f',name:'Notch'}}})
   const args=await generateArguments(options)
-  expect(args.join(' ')).toContain(join(dir,'versions/fixture/fixture.jar'))
+  const classpath=args[args.indexOf('-cp')+1].split(delimiter).map(path=>normalize(path))
+  expect(classpath).toContain(join(dir,'versions/fixture/fixture.jar'))
   expect(args.join(' ')).toContain('fabric-loader-0.16.0.jar')
   expect(await service.inspect(f.release,f.loaderVersion,dir)).not.toBeNull()
   const libraryPath=join(dir,'libraries/net/fabricmc/fabric-loader/0.16.0/fabric-loader-0.16.0.jar')
